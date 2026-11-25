@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 开发中，功能已齐、文档收尾。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 378 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
+**v0.1.0 开发中，功能已齐、文档收尾。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 390 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
 
 ## 安装
 
@@ -124,10 +124,11 @@ plugin_manager action=remove_bundle
 | [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md) | 逐轮开发任务卡与验收命令 |
 | `docs/PROTOCOL.md` | 人读流程：11 阶段出口判据、三问、卡住时的三档升级 |
 | [docs/INSTALL.md](docs/INSTALL.md) | 安装、冒烟验证清单、卸载 |
+| [docs/RELEASE.md](docs/RELEASE.md) | 发布流程（给发布者看：填元数据 → 四条验证 → npm / Release → 真装一次） |
 
 ## 开发
 
-零依赖：`lib/` 下只允许 `import 'node:*'` 与同目录相对路径。测试用 `node:test`。CI 在 ubuntu + windows 两个平台跑同样三条命令（[.github/workflows/test.yml](.github/workflows/test.yml)）。
+零依赖：`lib/` 下只允许 `import 'node:*'` 与同目录相对路径。测试用 `node:test`。CI 在 ubuntu + windows 两个平台跑同样四条命令（[.github/workflows/test.yml](.github/workflows/test.yml)）。
 
 ```bash
 node --test                    # 全量测试
@@ -135,6 +136,14 @@ node scripts/check-docs.mjs    # 文档互相引用一致
 node scripts/verify-pack.mjs   # 真跑 npm pack，断言 files 白名单没漏文件（A8）
 node scripts/smoke-pack.mjs    # 真打包、真解开、真加载，跑一遍 init→clarify→idea（A9 可自动化那半）
 ```
+
+发布前额外跑一条（不进 CI，因为它检查工作区是否干净）：
+
+```bash
+node scripts/release-check.mjs # 元数据填全、文档里没有占位符、工作区无未提交改动
+```
+
+发布流程见 [docs/RELEASE.md](docs/RELEASE.md)。
 
 ## 许可证
 
