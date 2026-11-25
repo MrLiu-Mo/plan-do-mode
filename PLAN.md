@@ -20,7 +20,7 @@
 | A6 | 产物可追踪 | 每次推进在项目仓库里产生一次只含模式产物的 commit |
 | A7 | glim 不受影响 | `A:\AI\glim` 无任何改动 |
 | A8 | 分发包完整 | `npm pack --dry-run --json` 的清单覆盖 `lib/` 全部模块 + `cordis.patch.yml` + 两个 locale + `icon.svg`；缺一个即失败 |
-| A9 | 从 tgz 装得上、卸得干净 | `dsh plugin --profile desktop add -w <tgz>` 后「边学边做」可选中；卸载后 preset 消失，`~/.plando` 与项目 `.plando/` 保留 |
+| A9 | 装得上、卸得干净 | `plugin_manager action=install_bundle` 后「边学边做」可选中；卸载后 preset 消失，`~/.plando` 与项目 `.plando/` 保留 |
 
 ---
 
@@ -51,6 +51,7 @@ A:\AI\plan-do-mode\
 │  └─ format.js            # plando_status 的文本渲染
 ├─ docs/PROTOCOL.md        # 人读流程：阶段/出口/判据/卡住协议
 ├─ docs/INSTALL.md         # 安装 + 冒烟验证清单
+├─ docs/START-HERE.md      # 入口：这套文件怎么用、创造模式什么时候需要
 ├─ docs/CONTRACT.md        # state.js 契约：阶段/事件/payload/错误消息（实现者必读）
 ├─ docs/API-FACTS.md       # DSH 插件 API 已验证事实（从 glim-mode 摘，防幻觉）
 ├─ docs/DEV-PROMPTS.md     # 交给别的 AI 实现的逐轮提示词（R0–R7 + 验收卡 + 纠偏卡）
@@ -214,8 +215,8 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
    - 检查 `.plando/state.json`、各产物、commit 历史。
 4. **分发形态验证（A8 / A9）**：
    - `npm pack --dry-run --json` → `node scripts/verify-pack.mjs` 断言清单完整。
-   - `npm pack` 出 tgz 后 `dsh plugin --profile desktop add -w "<tgz 绝对路径>"`，确认预设列表出现「边学边做」。
-   - 卸载（`dsh plugin remove` 或 `plugin_manager action=remove_bundle`）→ preset 消失、`~/.plando` 仍在。
+   - `npm pack` 出 tgz 后，用 `plugin_manager action=install_bundle target=<解包目录>` 装一次，确认预设列表出现「边学边做」。
+   - 卸载（`plugin_manager action=remove_bundle`）→ preset 消失、`~/.plando` 仍在。
 
 > 注：`plugin_manager` 不在当前会话工具集里，第 1–4 步需要你在创造模式会话里执行（或授权后由那边完成）；我这边能保证的是 A1（测试）、A8（pack 完整性）与文件正确性。
 
@@ -239,6 +240,21 @@ plugin_manager action=install_bundle target=A:\AI\plan-do-mode
 ```
 
 装完：新建会话的预设列表出现「边学边做」。卸载后 preset 消失，但 `~/.plando` 与项目 `.plando/` **保留**——卸载不删用户数据。
+
+**实测修正（2026-11-25，本机验证）**：
+
+- `dsh --profile desktop --dump-default-config` 直接报 `profile "desktop" is managed exclusively by the Electron application` —— 桌面 profile 由 Electron 应用独占管理。
+- `dsh plugin --profile <name> <pnpm-args...>` 是 **pnpm 透传**（`list` 实测可用），所以 ① ② 大概率只完成「装依赖」这一半，**不一定把包名写进 `package.json` 的 `dsh.profile.bundles`**——桌面版这个列表由 dshmarket 或 `plugin_manager` 维护。
+
+因此分工改成：
+
+| 场景 | 走哪条 |
+|---|---|
+| 开发期 / 首次验证（本机） | ③ `plugin_manager action=install_bundle`（创造模式会话） |
+| 发布后给别人（桌面版） | dshmarket 一键装（需要先进索引），或 `plugin_manager` 装本地目录 |
+| 非桌面托管 profile（`web` / `tui` / `headless`） | ① ② 可用，必要时手动补 `dsh.profile.bundles` |
+
+> A9 的验证按此改写：**用 `plugin_manager install_bundle` 装得上 + 卸得干净**；tgz 通道在桌面版上的激活方式待实测后再定论。
 
 ### 10.2 包元数据（照 `dsh-preset-deep` / `dsh-team-control` 的既有惯例）
 

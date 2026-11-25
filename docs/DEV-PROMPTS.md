@@ -380,7 +380,7 @@ git status --short   # 应该是空的
 | R4 | cards/checks/scaffold + 测试 | commit；跑 L3 验收卡（白名单绕过） |
 | R5 | policy/format/tools/index + 测试 | commit；**这里第一次能装**，装一次试试 |
 | R6 | 预设 + persona + 测试 | commit；装好后目视确认「边学边做」出现在预设列表 |
-| R7 | 分发包 + 文档 + 全量验证 | `npm pack` → 从 tgz 装一次 → 卸载 → commit |
+| R7 | 分发包 + 文档 + 全量验证 | `npm pack` + `verify-pack` → 用 `plugin_manager install_bundle` 装一次 → 卸载 → commit |
 
 每轮结束你只需要看三样：**测试通过数**、**git log**、**有没有动到任务卡以外的文件**。
 
