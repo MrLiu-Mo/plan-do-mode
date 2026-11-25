@@ -97,6 +97,65 @@ test('拒绝：scripts 的值会执行任意代码（键名合法也要查值，
   assert.deepEqual(fs.readdirSync(dir), [], '被拒时不该落盘');
 });
 
+// REVIEW-tools §9.3：下面这三类当初全部放行，而且因为 plando_check 现在真能跑 npm test，
+// 「AI 埋命令 → AI 自己执行」不再需要用户配合。每条都是实测过的绕过形态。
+test('拒绝：scripts 里的串联 / 环境变量前缀 / 非白名单命令名（§9.3 的绕过形态）', (t) => {
+  const dir = tmpDir(t);
+  const cases = [
+    // 串联：一条命令串两条
+    ['npm ci && node exploit.js', /串两条/],
+    ['true; node exploit.js', /串两条/],
+    ['node --test | tee out.txt', /串两条/],
+    ['node --test `whoami`', /串两条/],
+    ['node --test $(whoami)', /串两条/],
+    // 环境变量前缀：改造解释器行为
+    ['NODE_OPTIONS=--require=./evil.cjs node --test', /环境变量/],
+    ['PYTHONSTARTUP=./evil.py node --test', /环境变量/],
+    // 解释器开关的「绕开正则」形态（原来只匹配 `python -c` 紧邻）
+    ['python -X utf8 -c "open(\'x\',\'w\')"', /不合法|任意代码/],
+    ['python -u -c "print(1)"', /不合法|任意代码/],
+    ['py -3 -c "print(1)"', /不合法|任意代码/],
+    // 非白名单命令名
+    ['tar czf - src.js', /不在允许的脚本命令里/],
+    ['bash -c "rm x"', /不在允许的脚本命令里/],
+    ['./evil.sh', /不在允许的脚本命令里/],
+    ['make all', /不在允许的脚本命令里/],
+  ];
+  for (const [script, expected] of cases) {
+    const content = JSON.stringify({ name: 'x', scripts: { test: script } });
+    const r = writeScaffold(dir, 'package.json', content, AI);
+    assert.equal(r.ok, false, `应被拒：${script}`);
+    assert.match(r.reason, expected, `理由要对得上（${script}）：${r.reason}`);
+  }
+  assert.deepEqual(fs.readdirSync(dir), [], '被拒时不该落盘');
+});
+
+test('放行：正常脚本形态照旧不受影响（不能因为收紧就误杀）', (t) => {
+  const dir = tmpDir(t);
+  const cases = ['node --test', 'npm test', 'npm run build', 'tsc', 'eslint .', 'vitest run', 'python -m pytest', 'cargo test'];
+  for (const script of cases) {
+    const content = JSON.stringify({ name: 'x', scripts: { test: script } });
+    const r = writeScaffold(dir, 'package.json', content, AI);
+    assert.equal(r.ok, true, `应放行：${script} → ${r.reason}`);
+    fs.rmSync(path.join(dir, 'package.json'), { force: true });
+  }
+});
+
+// §9.3 的端到端链：埋命令（scaffold）→ 声明 npm test → plando_check 自己执行。
+// 第一环现在就断了，链条走不到第二步。
+test('端到端：AI 埋「python -X utf8 -c」的 package.json 会被拒，AUTORUN.txt 不产生', (t) => {
+  const dir = tmpDir(t);
+  const payload = JSON.stringify({
+    name: 'p',
+    version: '1.0.0',
+    scripts: { test: `python -X utf8 -c "open('AUTORUN.txt','w').write('x')"` },
+  }, null, 2);
+  const r = writeScaffold(dir, 'package.json', payload, AI);
+  assert.equal(r.ok, false, '这条链的第一环必须断在这里');
+  assert.equal(fs.existsSync(path.join(dir, 'package.json')), false);
+  assert.equal(fs.existsSync(path.join(dir, 'AUTORUN.txt')), false);
+});
+
 test('拒绝：依赖指向 URL / 本地路径（安装时会跑别人的脚本）', (t) => {
   const dir = tmpDir(t);
   const cases = [

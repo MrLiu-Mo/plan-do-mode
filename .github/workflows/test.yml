@@ -36,3 +36,8 @@ jobs:
       # A8：files 白名单漏文件时，本地一切正常、别人装完是坏的。
       - name: 验证 npm pack 清单完整
         run: node scripts/verify-pack.mjs
+
+      # A9 的可自动化那一半：真打包 → 解开 → 按 ES 模块加载 → apply → 走一遍 init。
+      # 清单齐 ≠ 装得上；这一步能把「import 了一个没进包的模块」挡在发布前。
+      - name: 分发包冒烟（解开后能加载、能跑）
+        run: node scripts/smoke-pack.mjs

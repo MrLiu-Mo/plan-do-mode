@@ -92,6 +92,24 @@ test('读工具挂上、写工具关掉（第一道防线）', () => {
   assert.match(raw, /^\s+edit: false\s*$/mu, 'dsh-tool-fs 必须显式 edit: false');
 });
 
+// REVIEW-tools §9.4 N18：守卫对「不认识的工具」是放行的（契约 §5 的语义表就这么写）。
+// 这个取向只有在「预设不挂任何会被当成 shell 别名的工具」时才安全。
+// 把前提写成断言：哪天有人往 plugins 里加了 node / python / git 这类名字，
+// 这条测试会红，提醒他同时去收守卫的 unknown 分支。
+test('unknown 放行的前提：预设不挂 node / python / git 这种「可能是 shell 别名」的插件', () => {
+  const suspicious = ['node', 'python', 'git', 'tar', 'bash', 'shell', 'exec', 'terminal'];
+  const pluginNames = [...raw.matchAll(/^\s+name:\s*'([^']+)'/gmu)].map((m) => m[1].toLowerCase());
+  for (const name of pluginNames) {
+    for (const word of suspicious) {
+      assert.ok(
+        !new RegExp(`(^|[-_/])${word}([-_/]|$)`).test(name),
+        `插件「${name}」的名字含「${word}」——守卫对未知工具放行，装它等于开一条 shell 通道；`
+        + '要么别装，要么同时把 policy.js 的 unknown 分支改成 fail-closed',
+      );
+    }
+  }
+});
+
 test('persona 正文长度在 2000–4000 字之间', () => {
   const { text } = extractBlockScalar('prefix');
   const body = text.replace(/\s+/gu, '');

@@ -89,7 +89,7 @@ plando：现在是「边做边学」阶段，这个模式不允许写文件—�
 
 唯一能写文件的是 `plando_scaffold`，它只写 7 个白名单配置文件（`package.json`、`tsconfig.json`、
 `.gitignore`、`.env.example`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），而且必须对应
-TECH 清单里**归属=ai** 的项，内容还要过校验（`postinstall` 这类会自动执行的钩子一律拒）。
+TECH 清单里**归属=ai** 的项，内容还要过校验：`postinstall` 这类会自动执行的钩子一律拒，`scripts` 的值要是有白名单的命令（`&&` 串联、环境变量前缀、`tar` / `bash` 这类一律不行）。
 你的源码它碰不到。
 
 ## 自动提交默认关着

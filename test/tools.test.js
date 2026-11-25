@@ -259,6 +259,25 @@ test('被拒的非 transition 调用也会写进 log.jsonl（REVIEW-tools M2）'
     lines.some((entry) => entry.kind === 'reject' && entry.source === 'tool' && /plando：/.test(entry.reason || '')),
     '应有一条 kind=reject、source=tool 的记录',
   );
+  // REVIEW-tools §9.4 N16：只有 source:'tool' 的话，多工具 / 多项目时分不清是谁被拒。
+  const reject = lines.filter((entry) => entry.kind === 'reject').pop();
+  assert.equal(reject.tool, 'plando_scaffold', `日志要写清是哪个工具拒的，实际 ${JSON.stringify(reject.tool)}`);
+  assert.equal(reject.dir, path.resolve(dir), '日志要写清是哪个项目被拒');
+});
+
+test('被拒日志带工具名与项目 dir，多项目时能区分（REVIEW-tools N16）', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir, call } = await pushToBuild(registered, config);
+  const logPath = path.join(dir, '.plando', 'log.jsonl');
+
+  // 两个工具、同一个项目：靠 tool 字段区分。
+  await call('plando_scaffold', { dir, path: 'src/app.js', content: 'x', techId: 't2' });
+  await call('plando_card', { action: 'start', dir, id: 'nope' });
+  const rejects = fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean)
+    .map((line) => JSON.parse(line)).filter((entry) => entry.kind === 'reject');
+  const tools = new Set(rejects.map((entry) => entry.tool));
+  assert.ok(tools.has('plando_scaffold'), `应记录 plando_scaffold，实际 ${[...tools].join(',')}`);
+  assert.ok(tools.has('plando_card'), `应记录 plando_card，实际 ${[...tools].join(',')}`);
 });
 
 test('plando_card 收尾必须有证据；无证据的 done 被拒且不落盘', async (t) => {

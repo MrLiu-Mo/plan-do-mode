@@ -1103,7 +1103,7 @@ const SCRIPT_VALUE_DENY = Object.freeze([
 | 缺口 | 实测 |
 |---|---|
 | `dependencies` 的版本白名单只认「普通版本号」开头，`latest` / `*` / `workspace:` 都放行（`SAFE_VERSION_RE`）。URL / `git+` / `file:` 已被拒——**这条修得比 `scripts` 好**，但 `latest` 意味着「装什么都行」，仍可指向一个含 `postinstall` 的包 | `{"dependencies":{"evil":"latest"}}` → 放行 |
-| `npm install <任意包名>` 作为 scripts 值放行（只拦了 `node -e` / `curl` / `| sh` 这类**直接**执行形态，没拦「装一个会自己跑代码的包」） | `scripts.test = 'npm install evil-pkg'` → 放行、`npm test` status=0 |
+| `npm install <任意包名>` 作为 scripts 值放行（只拦了 `node -e` / `curl` / `\| sh` 这类**直接**执行形态，没拦「装一个会自己跑代码的包」） | `scripts.test = 'npm install evil-pkg'` → 放行、`npm test` status=0 |
 
 **修法（和 §8.4 同一条原则）**：`scripts` 的值不能走 denylist，直接**复用 `checks.js` 的 `validateCommand`**——我实测过，同一批 payload 在 `validateCommand` 那边**全被拒**：
 
@@ -1234,3 +1234,241 @@ node $env:TEMP\plando-review\probe-final6.mjs    # G2 逐条 payload / dependenc
 node $env:TEMP\plando-review\probe72.mjs         # 只看 checks.validateCommand 现在放行/拒绝了什么
 node $env:TEMP\plando-review\probe71.mjs         # 实测 npm 链路在 Windows 上 ENOENT（平台差异）
 ```
+
+---
+
+## 9. 修复后复核（Lead 处置记录）
+
+> **这一节是复核证据，不是新的判决。判决仍在 §6，仍是 fix-first。**
+>
+> Lead 在 `7faeddb`（`fix(review): 闭合 REVIEW-state R1-R9 与 REVIEW-tools G1/G2/M1/M2/M4/L4/L7/L8`）、`ac84349`、`2c3c677`、`ab5f108` 里提交了针对本报告的一批修复。我用 §7 那套脚本**逐条对着 HEAD `ab5f108` 重跑**，结果分三部分：哪条真关上了（§9.2）、哪条还开着（§9.3）、这批修复自己引入了什么（§9.4）。
+>
+> 一句话结论：**14 条真正闭合，3 条部分闭合（G2 / M4 / L4），1 条收窄但没收死（L8）；L4 的修法还换来一个新高危 N14。G2 因为 `npm` 链路被同时修好，端到端攻击路径比修复前更短了。**
+
+### 9.1 处置表
+
+| 编号 | 严重度 | Lead 的修法（一句话） | 现状 |
+|---|---|---|---|
+| **G1** | 高 | `checks.js` 从「信任字符串」改成白名单：`ALLOWED_COMMANDS` + `INTERPRETER_DENY_FLAGS` + `GLUED_FLAGS_BY_BASE` + `RUN_SUBCOMMANDS` / `RUN_FLAGS` / `SAFE_PY_MODULES`，并且**遍历 argv 每一个 token**（等号式 `--eval=x`、黏连式 `-e…`、`python -c"…"` 一起挡） | **已闭合**：14/14 攻击命令在 `declare` 阶段被拒 —— `node -e "…"` / `cmd /c echo` / `node --eval="…"` / `node --require=./r.cjs --test` / `python -c"…"` / `python3 -c"…"` / `node --test --test-reporter=./r.cjs` / `node --run test` / `pip install x` / `cargo run` / `java -jar x.jar` / `npx evil-pkg` / `npm install evil-pkg` / `npm ci` |
+| **G2** | 高 | `scaffold.validateContent` 里对 `scripts` 的**值**加 `SCRIPT_VALUE_DENY` 正则、对四个 `*ependencies` 加 `SAFE_VERSION_RE`、加 `MAX_CONTENT_CHARS = 1 MB` | **部分闭合，高危仍成立**：`postinstall` / `node -e` / `curl \| sh` / `eval` / `rm -rf` / `powershell` 已拒；**但 `scripts` 的值仍然是 denylist**，`python -X utf8 -c "…"` / `python -u -c` / `python -I -c` / `py -3 -c` / `python3.12 -c` / `npm install <包>` / `npm ci` / `npx <包>` / `node evil.js` / `bash -c "…"` / `NODE_OPTIONS=--require=./evil.cjs node --test` **全部放行** → 见 §9.3 |
+| **G3** | 高 | `state.js` 加 `CARD_ID_RE`（`^[A-Za-z0-9_-]{1,40}$`）、`tools.writeText` 做路径 containment | **已闭合**：`../x` / `..\x` / `a/b` / `%2e%2e` / `CON` / 41 字全拒，`ESCAPED.md` 未越界落盘 |
+| **G4** | 高 | `dir` 必须绝对路径；`init` 遇到目录里已有模式产物就拒；`noteActiveDir` 移出 `resolveDir` | **已闭合**：指向已有手写 `IDEA.md` 的目录被拒且**用户文件首行未变**；`dir=".."` → `dir 必须是绝对路径`；`activeProjectDir` 保持 `""` |
+| **M1** | 中 | `afterTransition` 改成「先渲染（内存）→ 再 `saveState` → 再写日志 → 再 commit」 | **已闭合**：把 `TECH.md` 换成同名目录后 `stage` 停在 `build`（原 `build`），没有「状态已推进、产物没更新」 |
+| **M2** | 中 | `tools.run()` 统一在 catch 里写 `{kind:'reject', source:'tool', reason}` | **已闭合**：8 种不同拒绝 → 8 条留痕（另有字段缺失，见 §9.4-N16） |
+| **M3** | 中 | 错误文本统一过 `truncate` | **已闭合**：5 个工具在超长路径 + 坏 `state.json` 下 max 都是 160 |
+| **M4** | 中 | `cards.checkEvidenceObservable` 挡空话（太短 / 只有填充词 / 只有「完成」类词） | **部分闭合**：「我懂了」「没问题」「可以了」「完成了」「好」已拒；**但「跑了一下」「everything works」「跑了 vite build，退出码 0」仍直接过**；零产出 `全卡 downgrade → cards_done → ship_pass{explain:'好了'}` 仍能到 `stage=done`（项目里只有 `IDEA.md` + `TECH.md`，`checks.json` 不存在） |
+| **M5** | 中 | 改契约（`CONTRACT.md` §2「暂停不冻结状态机」）+ `ac84349` 让 `policy.js` 的暂停文案与契约一致 | **已闭合（以改契约消解，不是加校验）**：守卫文案现在是「…（暂停不冻结状态机；想清掉提醒就传 …resume）」 |
+| **M6** | 低 | `checks.js` 的 `head` 置空；两处 `action=verify` 改成 `action=done（evidence.kind=check）` | **已闭合** |
+| **L1 / L2** | 低 | `choose_build` 查重复卡 id / 重复 tech id | **已闭合**：`卡片 id 重复：c1——删掉重复的卡` |
+| **L3** | 低 | `nextIdeaId` 撞号加 `_2` / `_3` 后缀 | **已闭合** |
+| **L4** | 观察 | `project.readJson` 加 2 MB 上限 + `clarify answers` 加 32 KB 上限 + `scaffold` 加 1 MB 上限 | **部分闭合，且引入新故障**：`answers` 侧生效（33 KB 即拒）、`scaffold` 侧生效（但量的是**字符**不是字节：150 万 ASCII 拒，60 万中文 ≈1.8 MB 仍落盘）；**但写进 `state` 的其它字段没有对应上限**，单条就能把 `state.json` 顶过 2 MB 读上限 → **§9.4-N14（高）** |
+| **L5** | 低 | 白名单移除 `README.md` / `index.html` | **已闭合**（白名单现在就是 7 个配置文件） |
+| **L6** | 低 | `git.ARTIFACT_PATHS` 补 `VERIFY.md` | **已闭合**（`test/git.test.js` 断言同步） |
+| **L7** | 低 | `clarify record` 也走 `autoCommit`，但**不**渲 `IDEA.md`（契约把 `IDEA.md` 挂在 `clarify_done` 上） | **已闭合**：实测产生 `plando(clarify): detail` 提交；且**不会**把用户 `git add` 过但未提交的文件带进提交（`git.js` 的 pathspec 收窄仍在生效） |
+| **L8** | 观察 | `classifyTool` 前缀没命中时按**词元**兜底（按 `_` / `-` / 驼峰切开，任一词元命中就按对应能力处理） | **基本闭合**：`fs_write` / `mcp__filesystem__write_file` / `powershell` / `shell_exec` / `cmd` / `exec` / `spawn_teammate` 现在都拒；仍放行 `node` / `python` / `java` / `ruby` / `perl` / `php` / `deno` / `bun` / `git` / `tar` / `unzip` / `present` / `read` / `grep` / `todo_write`（见 §9.4-N18） |
+
+**统计**：原报告的 18 条（G1–G4 / M1–M6 / L1–L8）里，**14 条真闭合**（G1 / G3 / G4 / M1 / M2 / M3 / M5 / M6 / L1 / L2 / L3 / L5 / L6 / L7），**3 条部分闭合**（G2 高危、M4 中危、L4 观察项——L4 修了一半还换来一个新的高危 N14），**1 条基本收窄**（L8：危险名字都归位了，但未知名仍 fail-open，见 N18）。
+
+### 9.2 重跑结果：已关上（回归基线，可以照着守）
+
+一条命令：
+
+```powershell
+node $env:TEMP\plando-review\probe-final37.mjs   # 本节的 A / B / C 三段全部来自它
+```
+
+| 项 | 重跑实测（HEAD `ab5f108`） |
+|---|---|
+| G1 `declare` 白名单 | **14/14** 攻击命令全拒；反向 5/5 合法命令（`npm test` / `npx vitest run` / `node --test` / `python -m pytest` / `cargo test`）仍放行 |
+| G3 卡 id | **5/5** 非法 id 全拒，`.plando/cards/` 外无文件 |
+| G4 `dir` | 已有 `IDEA.md` 的目录拒绝立项、用户文件未动；相对路径拒绝 |
+| M1 渲染失败 | `stage` 不推进，日志不丢 |
+| M2 拒绝留痕 | 3 次拒绝 → log **+3** 行，字段 `{at, kind:'reject', source:'tool', reason}` |
+| M3 160 字 | 5 个工具全部 ≤160 |
+| M5 契约 | `CONTRACT.md` §2 与 `policy.js` 文案一致（`ac84349`） |
+| L6 | `ARTIFACT_PATHS = [IDEA.md, TECH.md, VERIFY.md, HANDOFF.md, CHANGE-GUIDE.md, .plando]` |
+| L7 | `clarify record` 产生 1 个 commit，且**不含**用户已暂存的文件 |
+
+这几条**现在都是有测试守着的**（`test/checks.test.js` 的 `validateCommand` 用例从 0 条涨到覆盖贴值 / 黏连 / 预加载 / 包管理器子命令；`test/review-state.test.js` 覆盖 id 与重复；`test/scaffold.test.js` 覆盖 1 MB 上限），不再只靠人肉复核。
+
+### 9.3 第一轮复核（HEAD `ab5f108`）：G2 仍活着 —— 而且因为 `npm` 链路被同时修好，**端到端路径比修复前更短**
+
+> **注意**：这一节记录的是 **`ab5f108` 那棵树**上的状态。看完这节之后 Lead 又做了一轮修复（在**未提交的工作树**里，见 §9.6），**G2 在那棵树上已经闭合**。保留这节是因为它记录了攻击链的完整形态，也是 §9.6 里「误杀」的由来。
+
+`7faeddb` 顺手修了 Windows 上 `npm` 的 spawn 问题（改成找 `node_modules/npm/bin/npm-cli.js` 用 `node` 跑）。这个修复单独看是对的（`npm test` 现在真的能跑通），但它和 G2 的残留**叠在一起**后，攻击链从「AI 埋命令 → **用户自己敲** `npm test`」变成了「**AI 自己埋命令 → AI 自己敲**」。
+
+端到端复现（`probe-final31.mjs`，全程 **4 次 `plando_*` 调用、用户零操作**）：
+
+```
+build 阶段，c1 是正常流程里的一张卡
+
+① plando_scaffold { dir, path:'package.json', techId:'t1', content: JSON.stringify({
+     name:'p', version:'1.0.0',
+     scripts: { test: `python -X utf8 -c "open('AUTORUN.txt','w').write('AI 自己跑的')"` },
+   }) }
+   → 已写 package.json。            （scripts 的值只过 SCRIPT_VALUE_DENY 正则，`-X utf8` 把它顶开了）
+
+② plando_card { action:'declare', dir, id:'c1', command:'npm test' }
+   → 已为卡片 c1 声明检查命令：npm test    （npm test 在 ALLOWED_COMMANDS / PM_SAFE_VERBS 里，合法）
+
+③ plando_check { action:'run', dir, name:'c1' }
+   → · 检查 c1：通过｜退出码 0              （真的执行了）
+
+④ plando_card { action:'done', dir, id:'c1', evidence:{kind:'check', summary:'跑了 npm test，退出码 0'} }
+   → 卡片 c1 已 done。                      （这句证据此时是真的——但它是 AI 自己造出来的真）
+
+之后 cards_done → ship_pass{explain:'检查都过了'} → stage = done
+AUTORUN.txt 存在 = true
+用户自己写的文件 = ["AUTORUN.txt", "IDEA.md", "TECH.md"]   ← 一个业务文件都没有
+```
+
+**这比 §8.5 写的版本严重。** §8.5 时这条链还需要用户配合敲 `npm test`；现在 `plando_check` 自己就能跑通，**「AI 不代写」的最后一道人肉闸门消失了**——`plando_check` 的设计前提是「执行用户已声明的检查」，但当 AI 能同时写 `package.json` 的 `scripts` 和声明 `npm test` 时，它自己就是那个「用户」。
+
+`validateContent` 仍然放行的 `scripts` 值（逐条实测）：
+
+| payload | `scaffold.validateContent` | `checks.validateCommand`（同一批） |
+|---|---|---|
+| `python -X utf8 -c "…"` | **放行** | 拒绝 |
+| `python -u -c` / `python -I -c` / `py -3 -c` / `python3.12 -c` | **放行** | 拒绝 |
+| `npm install evil-pkg` / `npm ci` / `npx evil-pkg` | **放行** | 拒绝 |
+| `node evil.js` | **放行** | 放行（这是「跑一个文件」，`validateCommand` 也分不出来） |
+| `bash -c "rm x"` | **放行** | 拒绝 |
+| `npm ci && node exploit.js` / `true; node exploit.js` | **放行** | 拒绝（`&&` / `;` 被拒） |
+| `NODE_OPTIONS=--require=./evil.cjs node --test` | **放行** | 拒绝（环境变量前缀被拒） |
+| `tar czf - src.js` | **放行** | 拒绝（`tar` 不在白名单） |
+
+**建议的修法（和 §8.4 同一条原则，只是这次要真的落到 `scaffold.js`）**：
+
+1. `scripts` 的每个值直接 `checks.validateCommand(value)`——我实测同一批 payload 那边**除了 `node evil.js` 这一种形态，其余 7/7 全拒**，差距只在「命令名紧邻开关的正则」vs「遍历 argv 每个 token」；`node <文件>` 靠这条修法关不上，得靠下面第 2 条；
+2. 再补一条兜底：`scripts` 的值**只能以 `ALLOWED_COMMANDS` 里的命令名开头**（允许 `cross-env` / `npm run x` 这类壳，其余一律拒），这样 `tar` / `make` / `./evil.sh` 也一起关掉；
+3. 值里出现 `&&` `||` `;` `|` 反引号 `$(` 一律拒——现在这些**全部放行**（`npm ci && node exploit.js` 实测过关），它们是「一条命令串两条」的最短路径；
+4. `scripts` 的值不允许含 `=` 开头的环境变量赋值（`NODE_OPTIONS=--require=…` 实测过关，它把 `node --test` 变成了加载任意模块）。
+
+### 9.4 这批修复引入 / 未覆盖的新问题
+
+#### N14　写侧没有与读侧对齐的规模上限 → **一次调用就能把项目写成「永久读不出来」**　【高】
+
+`7faeddb` 加了两个上限：读侧 `project.MAX_JSON_BYTES = 2 MB`、写侧 `tools.MAX_ANSWER_BYTES = 32 KB`（只查 `clarify` 的 `answers`）。**这两条不对称**：`state.json` 里还有一堆字段完全不受 32 KB 约束，其中任何一个超过 2 MB，文件就再也读不回来了。
+
+**复现（`probe-final37.mjs` C1，4 次调用）**：
+
+```
+① plando_project { action:'init', dir, name:'p' }                    → 已立项
+② plando_clarify { action:'record', dir, kind:'detail',
+     questions: ['q'.repeat(5 * 1024 * 1024)],        ← 只传 1 条，5 MB
+     answers: { what: 'x' } }                          → 已记录（detail，第 1 轮）。
+   state.json = 5.00 MB
+
+③ plando_status { dir }
+   → · 读不出项目状态：plando：项目状态 …\state.json 有 5121 KB，超过 2 MB 上限——先备份再人工检查，不要直接重置。
+④ plando_project { action:'open', dir }   → 同一条错
+   plando_project { action:'init', dir, name:'p' }
+   → plando：…已有项目状态（阶段 未知）——用 plando_project action=open 打开它   ← 死循环
+   plando_transition / plando_card / plando_clarify / plando_check   → 全部同一条错
+```
+
+**期望**：写侧就该拒绝——「这次要写进 `state.json` 的内容会让文件超过读上限」时返回 `plando：这一条有 5120 KB，超过 32 KB 上限——下一步：…`，和 `answers` 那条一模一样。
+**实际**：写成功了（返回 `已记录`，看起来是成功），下一句话起项目永久读不出来；`plando_project` 只支持 `open` / `list` / `init`，**没有任何一个 action 能在 state 超限后自愈**，只能人工去改 `.plando/state.json`。
+**为什么算新引入**：修复前 `state.json` 再大也只是「大文件」，`JSON.parse` 照样能读；是 2 MB 读上限把「大」变成了「读不出来」，而写侧没跟上。
+
+**同一根因的其它入口（全部实测单独就能顶过 2 MB）**：
+
+| 字段 | 一次调用 | 结果 |
+|---|---|---|
+| `clarify questions[0]` | 5 MB | state 5.00 MB → 读不出 |
+| `card done evidence.summary` | 3 MB | `卡片 c1 已 done。` → state 3.00 MB → 读不出 |
+| `tech_ok items[].title` | 2.5 MB | `已推进` → state 2.50 MB → 读不出 |
+| `card downgrade reason` | 2.5 MB | 成功 → state 2.50 MB → 读不出 |
+| `ship_pass explain` | 2.5 MB | `已推进：ship → done` → state 2.50 MB → **直接到 done 之后读不出** |
+
+**建议**：
+1. **写侧统一设卡**：在 `saveState`（或每个工具的写入口）序列化后比较字节数，超过 `MAX_JSON_BYTES` 的 80% 就拒，并报出是哪个字段太大——一处收口，六个入口一起关。注意 `MAX_CONTENT_CHARS` 走的是 `[...content].length`（**字符**），中文内容能写到 ~3 MB，改的时候一并按 `Buffer.byteLength` 口径统一；
+2. 每个自由文本字段给各自的短上限（`evidence.summary` / `reason` / `explain` 200–500 字，`questions[]` 200 字，`title` 100 字），口径和 `state.js` 已有的 `checkDoneObservable` 的 200 字上限一致；
+3. **给一条恢复通道**：`plando_project` 加 `action=repair`（把超限文件备份成 `state.json.bak.<时间戳>` 再重建最小骨架），或者至少在 `plando_status` 的恢复指引里写「也可以把 `.plando/state.json` 里那个超长字段删掉」——现在的指引只说「备份再人工检查」，没告诉人检查什么。
+
+#### N15　合法命令被误杀：`--test-reporter=<内置名>` 全拒　【中】
+
+`checks.js` 的 `INTERPRETER_DENY_FLAGS` 里有 `--test-reporter`，本意是挡 `--test-reporter=./evil.cjs`（加载任意模块）。但 Node 的**内置** reporter 是常见合法用法，现在一并被拒，而且给出的理由是错的：
+
+```
+validateCommand('node --test --test-reporter=spec')
+→ 命令里的「--test-reporter=spec」会让检查变成执行任意代码，不允许
+```
+
+实测 `spec` / `tap` / `dot` / `junit` / `lcov` **5/5 全拒**。用户写了 `--test-reporter=spec` 想声明成检查，模型会被告知「这会执行任意代码」——**假警报比漏报更容易让人不信任整套校验**，而且它会促使模型自己改写命令来绕开校验。
+
+**建议**：`--test-reporter` 的值在 `{spec, tap, dot, junit, lcov, github}` 里就放行（这些是 Node 内置的），含 `/` `\` `.js` 或以 `.` 开头的才拒；`--test-reporter-destination` 同理，只允许项目内的相对路径或直接拒（它是**写**文件，本来也不该出现在检查里）。
+
+#### N16　`reject` 日志没有工具名、没有项目 `dir`　【低】
+
+M2 修好之后所有拒绝都留痕了，但每行只有：
+
+```json
+{"at":"2026-11-25T13:26:36.345Z","kind":"reject","source":"tool","reason":"plando：卡片 nope 不存在——下一步：…"}
+```
+
+`source:"tool"` 是常量，**看不出是 `plando_card` 还是 `plando_scaffold` 拒的**；也没有 `dir`，多项目时无法区分是哪个项目被拒。`plando_transition` 那条 `{event, from}` 形状则是有上下文的——两条日志形状不一致。
+
+**建议**：`run()` 里把工具名和 `dir` 一起写进去（`{at, kind:'reject', tool:'plando_card', dir, reason}`），并让 transition 那条也走同一个写入函数，形状统一。这样「这个模型被拒了几次、卡在哪」才真的可查——否则 M2 只解决了「有没有」，没解决「是谁」。
+
+#### N17　`init` 成功消息可以 420 字　【低，观察】
+
+M3 管的是**错误**文本的 160 字上限。但成功消息同样会把完整路径拼进去：`dir` 是 3 层、每层 120 字的深目录时，第一行 `已立项：p（<完整路径>）` 是 **420 字**。契约的 160 字条款只约束 `plando：…——下一步：…` 形状的错误，所以**这不算违约**；但它和 M3 同一个根因（长路径直接进文本），而且这一行在终端里会折成 3 行。**建议**：成功消息里的路径超过 ~80 字就只显示尾部两段（`…\bbb\ccc`），完整路径让用户 `plando_status` 里看。
+
+#### N18　守卫的「词元兜底」仍是 fail-open　【观察】
+
+L8 的修法方向对（词元命中就按能力处理），但**没命中时仍然放行**。实测仍放行：`node` / `python` / `python3` / `java` / `ruby` / `perl` / `php` / `deno` / `bun` / `git` / `tar` / `unzip` / `present` / `read` / `grep` / `todo_write` / `note_edit`。这些名字里没有任何一个词元命中四个危险能力，所以全部落到 `unknown` → 放行。
+
+**当下不是绕过**（预设没挂这些名字的工具），但 `node` / `python` / `git` 这三个名字**在别的 DSH 版本里很可能就是一个 shell 工具的别名**。建议：把 `unknown` 从「放行」改成「放行 + 记一次日志」，或者反过来——维护一个「已知只读」白名单（`read` / `grep` / `glob` / `present` / `todo_write` / `note_edit` / `plando_*`），其余 fail-closed。后者更符合这个模式「宁可误伤也不放行」的取向。
+
+### 9.5 复核后的优先级
+
+**判决没变（§6 仍是 fix-first），但待办从 2 条变成 3 条，且第一条更难绕**：
+
+| 优先 | 项 | 一句话 | 修复成本 |
+|---|---|---|---|
+| 1 | **G2** | `scaffold` 的 `scripts` 值改调 `checks.validateCommand` + 只允许白名单命令名开头 + 拒 `&&`/`;`/`\|`/`` ` ``/`$(`/环境变量前缀。**这是唯一还活着的高危，而且现在不需要用户配合** | 小（一个函数调用 + 4 条规则） |
+| 2 | **N14** | 写侧统一用 `MAX_JSON_BYTES` 兜底 + 各自由文本字段短上限 + 给一条 `action=repair` 恢复通道 | 小到中（一处收口） |
+| 3 | **M4** | `evidence.kind='check'` 要接 `checks.json` 里最近一次 `run` 的真实 `exitCode`；`ship_pass.explain` 同样；全卡 downgrade 要求一句整体理由 | 中（要把 `run` 的结果落进 state） |
+
+进 KNOWN-ISSUES 即可：N15 / N16 / N17 / N18、`--watch` / `--inspect-brk` 挂满 60s 超时、`deno run` / `bun run` 形态的放行。
+
+**§9 的重跑命令**：
+
+```powershell
+node $env:TEMP\plando-review\probe-final37.mjs    # 本节 A（已关上）/ B（仍成立）/ C（新问题）三段
+node $env:TEMP\plando-review\probe-final31.mjs    # G2 新链路：4 次调用、用户零操作 → stage=done + 命令真的执行了
+node $env:TEMP\plando-review\probe-final23.mjs    # N14：questions 5MB → 项目读不出（每个 case 独立项目）
+node $env:TEMP\plando-review\probe-final33.mjs    # N14：8 个 action 逐个试，没有一个能自愈
+node $env:TEMP\plando-review\probe80.mjs          # N15：--test-reporter 内置名被误杀
+```
+
+*§9 的复核过程同样没有改动 `lib/` 与 `test/`；本节唯一改动是追加这段文字。*
+
+---
+
+## 10. §9 的处置记录（Lead 收到复核后同一轮内完成）
+
+§9 的复核结论是「14 条闭合、3 条部分闭合（G2 / M4 / L4）、1 条收窄（L8），外加 5 条新问题（N14–N18）」。
+下面是逐条处置。原始报告与 §9 一字未改。
+
+`node --test` **366 passed / 0 failed**；`check-docs` / `verify-pack` / `smoke-pack` 全过。
+
+| # | 处置 | 落在哪 |
+|---|---|---|
+| **G2**（§9.3，唯一还活着的高危） | **已闭合**。新增 `scaffold.validateScriptValue(key, value, validateCommand)`，四道规则：① 串联字符（`&&` `\|\|` `;` `\|` 反引号 `$(`）一律拒；② 环境变量前缀（`NODE_OPTIONS=…`）一律拒；③ 命令名必须在 `SCRIPT_COMMANDS` 白名单里（`tar` / `bash` / `./evil.sh` / `make` 全关）；④ 命令整体交给 `checks.validateCommand` 做 argv 级校验（`python -X utf8 -c` / `python -u -c` / `py -3 -c` / `npm ci` / `npx <包>` 全拒）。`validateCommand` 由 `tools.js` 注入——scaffold 不 import checks（依赖方向单向），没注入时退到本地兜底 `fallbackValidateCommand`（挡内联执行开关），**不是**放行 | `lib/scaffold.js`、`lib/tools.js` |
+| **N14**（高，写侧没有与读侧对齐） | **已闭合**。`project.saveState` 落盘前量字节数，超过读上限的 80%（1.6 MB）就**拒写**，并报出最大的 3 个字段路径（`largestFields`）。实测六个入口全部被挡在写入前：`clarify questions[0]` 5 MB / `card done evidence.summary` 3 MB / `tech title` 2.5 MB → 全部返回「这次要写的项目状态有 5121 KB，超过 1638 KB 写入上限（最大的是 clarify.answers[0].questions[0] ≈ 5120 KB）」，磁盘上仍是原来那份可读状态 | `lib/project.js` |
+| **N15**（中，合法命令被误杀） | **已闭合**。`--test-reporter` 从笼统拒绝改成「值必须在白名单里」（`spec` / `tap` / `dot` / `junit` / `lcov` / `github`），含路径分隔符 / 以 `.` 开头 / `.js` 结尾的值仍拒（那才是模块）。`--test-reporter=spec` 与 `--test-reporter spec` 两种写法都放行 | `lib/checks.js` |
+| **N16**（低，日志没有工具名） | **已闭合**。`run(args, body, deps, toolName)` 多收一个工具名，`logRejection` 写入 `{kind:'reject', source:'tool', tool, dir, reason}`。`dir` 优先取**这次调用自己带的**，没有再退到守卫记的活跃项目——多项目时分得清 | `lib/tools.js` |
+| **N17**（观察，成功消息 420 字） | **已处理**。`shortPath(dir)`：超过 60 字只显示尾部两段（`…\bbb\ccc`），完整路径仍可在 `plando_status` 里看到 | `lib/tools.js` |
+| **N18**（观察，unknown fail-open） | **不改，把前提写成断言**。理由：预设挂载的工具集是固定的（`cordis.patch.yml` 里没有 `node` / `python` / `git`，N18 描述的风险没有落点）；改成 fail-closed 会误伤 `present` / `ask_user_question` / `todo_write`，而「新版本加个工具就全废」比 N18 更常发生；契约 §5 与 INTERFACES §2 的语义表都明写「读 / 未知放行」，改它要先改契约。**但**加了 `test/preset.test.js` 的一条断言：插件名里一旦出现 `node` / `python` / `git` / `tar` / `bash` / `shell` / `exec` / `terminal` 这类词，测试立刻红，提醒改动者同时收 unknown 分支 | `lib/policy.js`（只加注释）、`test/preset.test.js` |
+| **M4**（中，证据不验真） | **部分闭合，本轮不做**。§9.5 把它排在第三位，修法要「把 `plando_check` 的 `exitCode` 落进 state，done 时比对」。这是一个**状态机语义变更**（要新增 state 字段 + 迁移 + 契约修订），不该和一轮安全修复混在一起。已在下面「已知问题」里显式列出 | — |
+
+**顺手补的可自动化项（A9 的那一半）**：新增 `scripts/smoke-pack.mjs` —— 真打包 → 真解到一个空目录 → 按 ES 模块真 `import` → 假 ctx `apply` → 断言 8 个工具 + 1 个守卫 → 走一遍 `init → clarify → clarify_idea` → 断言守卫从 fail-closed 变成按阶段拦写工具。这能把「清单齐了但 import 了一个没进包的模块」挡在发布前，`verify-pack`（只看清单）做不到。已进 CI 与 `npm run smoke-pack`。
+
+**已知问题（进 KNOWN-ISSUES，不在 0.1.0 修）**：
+
+- **M4**：证据只验形状与「不是空话」，不验「真的做过」。`plando_check` 的退出码目前不进 state，所以 `evidence.kind='check'` 的 summary 仍是自述。
+- `--watch` / `--inspect-brk` 会让检查挂满 60 秒超时（有超时兜底，不是安全问题）。
+- `deno run x.ts` / `bun run x.ts` 放行：这两个解释器的核心用法就是执行文件，argv 上无法与「跑检查」区分（§8.7 已记）。
+- 三处 `minutes` 计算仍是独立实现（`state.checkBudget` / `state.computeSize` / `artifacts.renderTech`），口径已统一但没抽公共函数。

@@ -34,6 +34,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "verify-pack": "node scripts/verify-pack.mjs"
+    "verify-pack": "node scripts/verify-pack.mjs",
+    "smoke-pack": "node scripts/smoke-pack.mjs"
   }
 }

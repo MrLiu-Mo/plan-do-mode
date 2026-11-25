@@ -75,6 +75,31 @@ test('saveState 读回一致，刷新 updatedAt，且不留 .tmp', (t) => {
   assert.deepEqual(fs.readdirSync(projectPaths(dir).plandoDir).sort(), ['log.jsonl', 'state.json']);
 });
 
+// REVIEW-tools §9.4 N14：读侧有 2 MB 上限，写侧没有对齐 → 一次调用就能把项目写成
+// 「永久读不出来」（写入成功、之后每个工具都报超限，且没有 repair 通道）。
+test('saveState：写入前挡住会把 state.json 顶过读上限的内容，并指出是哪个字段', (t) => {
+  const dir = path.join(tmpRoot(t), 'cap');
+  const created = initProject(dir, { name: '大字段' });
+  const before = fs.statSync(projectPaths(dir).statePath).size;
+
+  const huge = { ...created.state, note: 'x'.repeat(3 * 1024 * 1024) };
+  assert.throws(() => saveState(dir, huge), /plando：.*写入上限/);
+  // 报错要能定位：只说「太大」等于让人自己翻 JSON。
+  assert.throws(() => saveState(dir, huge), /note/);
+  // 拒写之后磁盘上还是原来那份可读的状态，没有半写。
+  assert.equal(fs.statSync(projectPaths(dir).statePath).size, before);
+  assert.equal(loadState(dir).ok, true, '拒写之后状态必须仍然读得出来');
+});
+
+test('saveState：刚好在限额内的正常增长照常写入', (t) => {
+  const dir = path.join(tmpRoot(t), 'ok');
+  const created = initProject(dir, { name: '正常' });
+  // 512 KB 远小于 1.6 MB 的写上限，属正常量级。
+  const next = saveState(dir, { ...created.state, note: 'y'.repeat(512 * 1024) });
+  assert.equal(next.note.length, 512 * 1024);
+  assert.equal(loadState(dir).ok, true);
+});
+
 test('loadState：state.json 不存在时返回 ok:false 而不是抛错', (t) => {
   const result = loadState(path.join(tmpRoot(t), 'nope'));
   assert.equal(result.ok, false);

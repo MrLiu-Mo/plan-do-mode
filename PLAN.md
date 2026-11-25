@@ -147,7 +147,7 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 
 **配置/脚手架**（唯一例外）：`plando_scaffold` 按文件名白名单放行（精确名单，仅限项目根，v1 实装 7 项：`package.json`、`tsconfig.json`、`.gitignore`、`.env.example`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），且必须对应 `归属=ai` 的 TECH 项。名单是**白名单不是黑名单**：不在表里的路径一律拒绝，不做通配推导——v1 宁可少放行，也不给「文件名一改就绕过」留口子。
 
-> 初稿名单有 11 项，实测后砍掉 4 项：`vite.config.js` / `vite.config.ts` 是可执行 JS，写进去就能被 `node vite.config.js` 跑起来，等于开了一个任意代码入口；`README.md` / `index.html` 是**用户的内容文件**不是配置文件，替用户写等于代写。内容维度也要校验：`package.json` 的 `scripts` 只认 `test` / `build` / `lint` 这类键，`postinstall` 之类的生命周期钩子一律拒（否则「AI 不代写」变成「AI 在你机器上预埋一条命令」）。见 `docs/REVIEW-tools.md` G2 / L5。
+> 初稿名单有 11 项，实测后砍掉 4 项：`vite.config.js` / `vite.config.ts` 是可执行 JS，写进去就能被 `node vite.config.js` 跑起来，等于开了一个任意代码入口；`README.md` / `index.html` 是**用户的内容文件**不是配置文件，替用户写等于代写。内容维度也要校验：`package.json` 的 `scripts` 只认 `test` / `build` / `lint` 这类键，`postinstall` 之类的生命周期钩子一律拒（否则「AI 不代写」变成「AI 在你机器上预埋一条命令」）。**值**还要过命令白名单：串联（`&&` / `;` / `|` / 反引号 / `$(`）、环境变量前缀（`NODE_OPTIONS=…`）、非白名单命令名（`tar` / `bash` / `./x.sh`）一律拒，并复用 `checks.validateCommand` 的 argv 级校验——这条链的严重性在于 `plando_check` 会执行 `npm test`，所以「AI 埋命令」和「AI 执行命令」原本能自己闭环。见 `docs/REVIEW-tools.md` G2 / L5 / §9.3。
 
 **读**永不拦：AI 要读用户写的代码才能验收。
 

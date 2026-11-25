@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 开发中，功能已齐、文档收尾。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 354 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
+**v0.1.0 开发中，功能已齐、文档收尾。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 366 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
 
 ## 安装
 
@@ -105,7 +105,7 @@ plugin_manager action=remove_bundle
 这个包在 DSH 市场索引里会被扫描出两项能力，**这是真的**：
 
 - **`shell`**：`plando_check` 会执行命令，但**只执行用户在卡片里声明过的检查命令**（`.plando/checks.json`），不接受临时传入的任意命令；而且要过可执行文件白名单 + 内联执行开关拦截（`node -e`、`python -c`、`npm install`、`cargo run`、`java -jar` 这类一律拒）。
-- **`fs-write`**：`plando_scaffold` 会写文件，但**只写白名单内的 7 个声明式配置文件**（`package.json`、`tsconfig.json`、`.gitignore`、`.env.example`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），内容也要过校验（`scripts` 只认 `test` / `build` / `lint` 这类键且**值里不许出现内联执行 / 下载管道**，`postinstall` 之类生命周期钩子与 `http:` / `git:` / `file:` 形式的依赖一律拒），且必须对应 TECH 清单里归属为「可交给 AI」的条目；此外插件要写 `.plando/` 状态与产物。
+- **`fs-write`**：`plando_scaffold` 会写文件，但**只写白名单内的 7 个声明式配置文件**（`package.json`、`tsconfig.json`、`.gitignore`、`.env.example`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），内容也要过校验（`scripts` 只认 `test` / `build` / `lint` 这类键且**值要过命令白名单**：内联执行、`&&` 串联、环境变量前缀、`tar` / `bash` 这类非白名单命令一律拒；`postinstall` 之类生命周期钩子与 `http:` / `git:` / `file:` 形式的依赖同样拒），且必须对应 TECH 清单里归属为「可交给 AI」的条目；此外插件要写 `.plando/` 状态与产物。
 
 而**「AI 不代写」是模式内部的硬约束**，不是这个包没有写文件的能力：
 
@@ -133,6 +133,7 @@ plugin_manager action=remove_bundle
 node --test                    # 全量测试
 node scripts/check-docs.mjs    # 文档互相引用一致
 node scripts/verify-pack.mjs   # 真跑 npm pack，断言 files 白名单没漏文件（A8）
+node scripts/smoke-pack.mjs    # 真打包、真解开、真加载，跑一遍 init→clarify→idea（A9 可自动化那半）
 ```
 
 ## 许可证
