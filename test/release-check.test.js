@@ -132,14 +132,18 @@ test('checkRelease：仓库对象缺 url 算阻塞', () => {
   assert.ok(blockers.some((b) => b.includes('repository')), blockers.join('\n'));
 });
 
-test('真 package.json 现在应该是「有阻塞」的（发布前状态，不是 bug）', () => {
+test('真 package.json 现在是「零阻塞」的（占位符已换成真实仓库）', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const { blockers } = checkRelease(meta, {
     'README.md': fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8'),
-  }, { gitStatus: '' });
-  // 仓库地址还没定（用户 2026-11-25 确认「先占位、建好仓库再替换」），
-  // 所以这条断言的作用是：**等它哪天变成零阻塞，说明占位符被换掉了**——
-  // 那时这条测试会红，提醒把它改成「零阻塞」断言。这是故意的绊线。
-  assert.ok(blockers.length > 0, '占位符还没换，本该有阻塞项；如果这里红了，说明该把断言改成零阻塞了');
-  assert.ok(blockers.some((b) => b.includes('<owner>') || b.includes('repository')), blockers.join('\n'));
+    'PLAN.md': fs.readFileSync(path.join(ROOT, 'PLAN.md'), 'utf8'),
+    'docs/INSTALL.md': fs.readFileSync(path.join(ROOT, 'docs', 'INSTALL.md'), 'utf8'),
+  }, { gitStatus: '', headTag: 'v0.1.0' });
+  // 2026-11-25 仓库建好（github.com/MrLiu-Mo/plan-do-mode），元数据与文档链接都换成了真值，
+  // 所以这条从「断言有阻塞」翻成「断言零阻塞」——它就是那条绊线，翻面了。
+  assert.deepEqual(blockers, [], `发布元数据应当齐了：${blockers.join(' | ')}`);
+  assert.equal(meta.repository.url, 'git+https://github.com/MrLiu-Mo/plan-do-mode.git');
+  assert.equal(meta.homepage, 'https://github.com/MrLiu-Mo/plan-do-mode#readme');
+  assert.equal(meta.bugs.url, 'https://github.com/MrLiu-Mo/plan-do-mode/issues');
+  assert.equal(meta.icon, './icon.svg');
 });

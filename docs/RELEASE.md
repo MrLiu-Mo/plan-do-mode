@@ -13,22 +13,29 @@ node scripts/release-check.mjs
 **它不进 `node --test`**：这个仓库在开发期一直有时间戳和未提交改动，把它塞进测试只会天天红。
 发布前手动跑一次，全 ✓ 再往下走。
 
-## 1. 定包名与仓库地址（唯一必须你亲手改的一处）
+## 1. 包名与仓库地址（已定，留档备查）
 
-当前是占位：
+**2026-11-25 已填好**，不需要再改：
 
-| 位置 | 现在 | 要改成 |
-|---|---|---|
-| `package.json` 的 `name` | `dsh-plan-do` | 若用 npm scope，改成 `@you/dsh-plan-do` |
-| `package.json` 的 `repository` / `homepage` / `bugs` | **缺** | 建好仓库后补上 |
-| `README.md` 第 33 行附近的 tgz 链接 | `github.com/<owner>/plan-do-mode` | 真实 `owner/repo` |
-| `PLAN.md` §10.1 的同一处 | 同上 | 同上 |
+| 位置 | 值 |
+|---|---|
+| `package.json` 的 `name` | `dsh-plan-do`（不带 scope） |
+| `package.json` 的 `repository` | `git+https://github.com/MrLiu-Mo/plan-do-mode.git` |
+| `package.json` 的 `homepage` | `https://github.com/MrLiu-Mo/plan-do-mode#readme` |
+| `package.json` 的 `bugs` | `https://github.com/MrLiu-Mo/plan-do-mode/issues` |
+| `package.json` 的 `icon` | `./icon.svg`（与 `exports` 里那条一致，包内自描述） |
+| `package.json` 的 `author` | `MrLiu-Mo <2837243604@qq.com>`（会公开显示在 npm 页面） |
+| `README.md` / `PLAN.md` 的 tgz 链接 | `github.com/MrLiu-Mo/plan-do-mode` |
 
-改完跑 `node scripts/release-check.mjs`，它会把还含 `<owner>` 的地方指出来。
+改完跑 `node scripts/release-check.mjs`——它会把**还指向假仓库的网址**指出来
+（只提到占位符号样的说明文字不算，判据要求占位符紧挨 URL 上下文）。
 
 > 改 `name` 会连带影响：`cordis.patch.yml` 里插件项的 `name:`、`test/preset.test.js` 的断言、
 > `test/smoke-pack.test.js` 的 `meta.name` 断言、`scripts/verify-pack.mjs` 的 `requiredFiles`。
 > 这四处是**故意**写死的——包名是契约的一部分，改它就该红一次测试提醒你全都改到。
+
+> `icon` 若索引端要求绝对 URL 而不是相对路径，只改 `package.json` 的 `icon` 这一处即可
+> （`files` 白名单里的 `icon.svg` 照旧要留着，它同时是包内资源）。
 
 ## 2. 确认版本号
 
@@ -38,7 +45,7 @@ node scripts/release-check.mjs
 ## 3. 四条验证全过
 
 ```bash
-node --test                     # 378 条，必须全绿
+node --test                     # 397 条，必须全绿
 node scripts/check-docs.mjs     # 文档交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 真打包 → 解开 → 真加载 → 跑一遍流程
@@ -110,8 +117,8 @@ git push origin v0.1.0
 
 ## 附：发布前检查表（打印出来用）
 
-- [ ] `node scripts/release-check.mjs` 全 ✓
-- [ ] `name` / `repository` / `homepage` / `bugs` / `icon` 都已填真值，没有 `<owner>`
+- [ ] `node scripts/release-check.mjs` 全 ✓（第 1 节那些值已填好，这一步只需工作区干净）
+- [ ] `package.json` 的 `repository` / `homepage` / `bugs` / `icon` / `author` 都是真值，没有占位网址
 - [ ] README 与 PLAN 里的 tgz 链接指向真实仓库
 - [ ] `node --test` 全绿（干净检出上再跑一次）
 - [ ] `check-docs` / `verify-pack` / `smoke-pack` 全过

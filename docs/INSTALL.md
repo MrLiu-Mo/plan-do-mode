@@ -148,7 +148,8 @@ node scripts/smoke-pack.mjs     # 分发包冒烟：真打包 → 解开 → 真
 node scripts/release-check.mjs  # 元数据填全了吗、文档里还有仓库地址占位符吗、工作区干净吗
 ```
 
-它现在**是红的**——仓库地址还没定。等你把 README / PLAN 里的仓库地址占位符换成真实值、补上
-`repository` / `homepage` / `bugs` / `icon`，它会变绿。发布流程见 [RELEASE.md](RELEASE.md)。
+它现在**是绿的**（仓库地址已定：`github.com/MrLiu-Mo/plan-do-mode`）。注意它只在**发布前那一刻**
+需要绿：开发期工作区总有未提交改动，那条会报「工作区不干净」——这是**预期行为**，不是 bug。
+发布流程见 [RELEASE.md](RELEASE.md)。
 
 装本地目录版本时，改完代码**要重新装一次**（`link:` 指向目录，但 profile 里的配置是装那一刻生成的）。

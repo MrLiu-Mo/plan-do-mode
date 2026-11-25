@@ -30,7 +30,7 @@ plugin_manager action=list_plugins        # 确认 preset-plan-do 在，状态�
 dsh plugin --profile <profile> add ./dsh-plan-do-0.1.0.tgz
 
 # 或者直接给 URL
-dsh plugin --profile <profile> add -w "https://github.com/<owner>/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz"
+dsh plugin --profile <profile> add -w "https://github.com/MrLiu-Mo/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz"
 ```
 
 实测（2026-11-25，本机 pnpm 11）：`dsh plugin --profile <name> add <tgz>` 会把 `dsh-plan-do` 同时写进 `dependencies` 和 `dsh.profile.bundles`；`remove dsh-plan-do` 会两处一起清掉。装完同样是**新建会话 → 预设列表 → 「边学边做」**。

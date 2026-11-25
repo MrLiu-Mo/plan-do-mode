@@ -4,6 +4,16 @@
   "type": "module",
   "description": "把一个小想法一步步学会并做出来的 DSH 模式：AI 只教、只验收，不代写。",
   "license": "MIT",
+  "author": "MrLiu-Mo <2837243604@qq.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrLiu-Mo/plan-do-mode.git"
+  },
+  "homepage": "https://github.com/MrLiu-Mo/plan-do-mode#readme",
+  "bugs": {
+    "url": "https://github.com/MrLiu-Mo/plan-do-mode/issues"
+  },
+  "icon": "./icon.svg",
   "keywords": [
     "dsh-plugin",
     "dsh-bundle",

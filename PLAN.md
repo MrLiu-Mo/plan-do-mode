@@ -235,7 +235,7 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 dsh plugin --profile desktop add dsh-plan-do
 
 # ② GitHub Release tgz（不需要 npm 账号，国内网络更稳，推荐作主通道）
-dsh plugin --profile desktop add -w "https://github.com/<owner>/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz"
+dsh plugin --profile desktop add -w "https://github.com/MrLiu-Mo/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz"
 
 # ③ 开发期本地目录
 plugin_manager action=install_bundle target=A:\AI\plan-do-mode
