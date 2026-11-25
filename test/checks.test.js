@@ -163,7 +163,7 @@ test('validateCommand：包管理器只许跑脚本，不许安装 / 执行任�
 // 「加不加 npx 结论不同」等于把白名单教成一道可试错的谜题。
 test('npx 与裸命令名同口径：ALLOWED_COMMANDS 里有的，加 npx 也该放行（§12 R1）', () => {
   const same = [
-    'vite build', 'next build', 'webpack', 'rollup -c', 'esbuild --bundle',
+    'vite build', 'next build', 'webpack --mode production', 'rollup -c', 'esbuild --bundle',
     'parcel build', 'react-scripts build', 'nodemon x.js', 'pm2 start', 'tsx src/x.ts',
     'serve dist', 'tsc --noEmit', 'vitest run', 'jest', 'eslint .', 'prettier --check .',
   ];
@@ -268,6 +268,62 @@ test('路径类参数不许指向项目外（§14 R6）', () => {
   // 但归一化后真的走到项目外的必须拒（否则「用 .. 抵消」就成了绕过办法）
   for (const cmd of ['node --test src/../../test/a.js', 'node --test a/../../../x.js']) {
     assert.ok(validateCommand(cmd), `归一化后越界必须拒：${cmd}`);
+  }
+});
+
+// REVIEW-tools §16 R9：上一轮的盘符判据只认「盘符 + 分隔符」，于是**盘符相对路径**
+// （`C:evil.js` / `c:..\..\x.js`）整个漏了。review 指出这不是「需要额外条件」——
+// `..\..` 从任何目录都能往上退，攻击者自己能造。这一条按形状补齐。
+test('盘符相对路径与「= 之后再来一段路径」也不能越界（§16 R9）', () => {
+  for (const cmd of [
+    'node C:evil.js',
+    'node c:..\\..\\x.js',
+    'node C:x.js',
+    'tsc -p../tsconfig.json',
+    'tsc -p..\\tsconfig.json',
+    'node --test --prefix=a=../x',
+    'node --test --outDir==../x',
+  ]) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `必须拒绝：${cmd}`);
+  }
+  // 冒号出现在**参数值**里（不是盘符）的写法不能被误杀
+  for (const cmd of ['node --test --test-name-pattern=a:b', 'node --test --test-name-pattern=file:src', 'vite build --outDir=dist']) {
+    assert.equal(validateCommand(cmd), null, `不该误杀：${cmd} → ${validateCommand(cmd)}`);
+  }
+});
+
+// REVIEW-tools §16 R13：`npm test -- --import=./h.mjs` 里 npm 会把参数**转发**给它跑的脚本，
+// 而解释器那几道闸门全部按 argv[0] 判——argv[0] 是 npm，于是一道都不跑。
+// 这和 `npx` 洗白（R5）是同一个结构：入口程序看到的 argv 不是下游程序看到的 argv。
+test('包管理器转发的参数也要过解释器口径（§16 R13）', () => {
+  // 转发危险开关 → 拒
+  for (const cmd of [
+    'npm test -- --import=./h.mjs',
+    'npm test -- --loader=./h.mjs',
+    'npm test -- -r ./h.mjs',
+    'npm test -- --experimental-loader=./h.mjs',
+    'npm test -- -e "1"',
+    'npm test -- --test-reporter=./h.mjs',
+    // 不带 `--` 也会被转发（npm 把多余的参数当作脚本参数）
+    'npm test sub/pwn.js --import=./h.mjs',
+    'pnpm test -- --require ./x.cjs',
+    'yarn test -r ./x.cjs',
+  ]) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `必须拒绝：${cmd}`);
+    assert.match(bad, /转发|任意代码/, `理由要说明是转发：${cmd} → ${bad}`);
+  }
+  // 正常的转发形态不能误杀（放行的是脚本自己的参数，不是 node 的开关）
+  for (const cmd of [
+    'npm test -- --coverage',
+    'npm test -- --watchAll=false',
+    'npm test -- src/login.test.js',
+    'npm run build -- --mode production',
+    'vitest run --reporter=junit',
+    'jest --coverage',
+  ]) {
+    assert.equal(validateCommand(cmd), null, `不该误杀：${cmd} → ${validateCommand(cmd)}`);
   }
 });
 
