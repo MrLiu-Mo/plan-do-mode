@@ -87,8 +87,10 @@ plando：现在是「边做边学」阶段，这个模式不允许写文件—�
 - **结构性**：预设里根本没挂写工具、命令工具。这不是"被拒绝"，是它们不存在。
 - **守卫**：读工具照常放行（AI 要读你的代码才能验收），写 / 命令 / 子代理一律拒绝。
 
-唯一能写文件的是 `plando_scaffold`，它只写 11 个白名单配置文件（`package.json`、`tsconfig.json`、
-`.gitignore` 这类），而且必须对应 TECH 清单里**归属=ai** 的项。你的源码它碰不到。
+唯一能写文件的是 `plando_scaffold`，它只写 7 个白名单配置文件（`package.json`、`tsconfig.json`、
+`.gitignore`、`.env.example`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），而且必须对应
+TECH 清单里**归属=ai** 的项，内容还要过校验（`postinstall` 这类会自动执行的钩子一律拒）。
+你的源码它碰不到。
 
 ## 自动提交默认关着
 

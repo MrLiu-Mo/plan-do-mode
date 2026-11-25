@@ -40,6 +40,8 @@ function makeDeps(t, overrides = {}) {
   const deps = {
     config,
     paths: project.projectPaths(config.defaultProjectDir),
+    // 生产环境里由 lib/index.js 注入；测试也带上，才能验证「活跃项目」相关的行为。
+    runtime: { activeProjectDir: '' },
     state,
     project,
     artifacts,
@@ -241,6 +243,24 @@ test('全链路：transition 成功会重渲染产物、落盘并追加 log.json
   assert.ok(after.some((entry) => entry.kind === 'reject' && entry.event === 'ship_pass'));
 });
 
+test('被拒的非 transition 调用也会写进 log.jsonl（REVIEW-tools M2）', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir, call } = await pushToBuild(registered, config);
+  const logPath = path.join(dir, '.plando', 'log.jsonl');
+  const before = fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean).length;
+
+  // build 阶段写 scaffold 之外的路径 → 被拒；这类拒绝以前完全不记日志。
+  const rejected = await call('plando_scaffold', { dir, path: 'src/app.js', content: 'x', techId: 't2' });
+  assert.match(rejected, /plando：/);
+
+  const lines = fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.ok(lines.length > before, '被拒的调用应该留痕');
+  assert.ok(
+    lines.some((entry) => entry.kind === 'reject' && entry.source === 'tool' && /plando：/.test(entry.reason || '')),
+    '应有一条 kind=reject、source=tool 的记录',
+  );
+});
+
 test('plando_card 收尾必须有证据；无证据的 done 被拒且不落盘', async (t) => {
   const { registered, config } = registerAll(t);
   const { dir, call } = await pushToBuild(registered, config);
@@ -283,11 +303,13 @@ test('plando_check 只跑已声明的命令：未声明被拒、声明后能跑'
   const undeclared = await checkDef.execute({ action: 'run', dir, name: 'c1' });
   assert.match(undeclared, /没有在 checks.json 里声明|plando：/);
 
+  // 检查命令必须是「真实脚本 + node 文件名」：`node -e` 会被 REVIEW-tools G1 的白名单拒掉。
+  fs.writeFileSync(path.join(dir, 'check-ok.mjs'), 'process.exit(0)\n', 'utf8');
   const declared = await call('plando_card', {
     action: 'declare',
     dir,
     id: 'c1',
-    command: 'node -e "process.exit(0)"',
+    command: 'node check-ok.mjs',
   });
   assert.match(declared, /已为卡片 c1 声明/);
 
@@ -297,7 +319,20 @@ test('plando_check 只跑已声明的命令：未声明被拒、声明后能跑'
 
   const listed = await checkDef.execute({ action: 'list', dir });
   assert.match(listed, /c1/);
-  assert.match(listed, /node -e/);
+  assert.match(listed, /node check-ok\.mjs/);
+});
+
+test('plando_card action=declare 拒绝不存在的卡 id、拒绝内联执行命令', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir, call } = await pushToBuild(registered, config);
+
+  const ghost = await call('plando_card', { action: 'declare', dir, id: 'ghost-key', command: 'node -v' });
+  assert.match(ghost, /不存在|plando：/);
+  assert.equal(fs.existsSync(path.join(dir, '.plando', 'checks.json')), false, '不存在的卡不该写进 checks.json');
+
+  const inline = await call('plando_card', { action: 'declare', dir, id: 'c1', command: 'node -e "process.exit(0)"' });
+  assert.match(inline, /任意代码|不允许|plando：/);
+  assert.equal(fs.existsSync(path.join(dir, '.plando', 'checks.json')), false, '危险命令不该落盘');
 });
 
 test('plando_scaffold 在 build 阶段放行 ai 项、拒绝 user 项与白名单外路径', async (t) => {

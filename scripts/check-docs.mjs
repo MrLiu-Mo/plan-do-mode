@@ -89,8 +89,19 @@ for (const target of [prompts, apiFacts, contract]) {
 }
 
 // ── 4. 文档之间的相对链接必须指向真实文件 ────────────────────────────
-const startHere = read('docs/START-HERE.md');
-for (const [name, text] of [['PLAN.md', plan], ['docs/START-HERE.md', startHere], ['docs/DEV-PROMPTS.md', prompts], ['docs/CONTRACT.md', contract], ['docs/API-FACTS.md', apiFacts]]) {
+// 直接遍历仓库里的全部 .md：新增文档自动纳入，不用回来改这张表。
+const mdFiles = [];
+(function walk(dir, prefix) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+    else if (entry.name.endsWith('.md')) mdFiles.push(rel);
+  }
+})(ROOT, '');
+
+for (const name of mdFiles) {
+  const text = read(name);
   const links = [...new Set(all(text, /\]\(([^)#\s]+\.md)\)/g))];
   for (const link of links) {
     const base = path.dirname(path.join(ROOT, name));

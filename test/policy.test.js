@@ -59,6 +59,28 @@ for (const [cap, names] of Object.entries(CAP_CASES)) {
   });
 }
 
+// 前缀拦不住的写法：名字里「能力词在后」（REVIEW-tools L8）。
+// 这些如果不按词元兜底，就都是 unknown → 放行，等于守卫形同虚设。
+const TOKEN_CASES = {
+  'fs-write': ['fs_write', 'file_write', 'writeFile', 'save_file', 'delete_file'],
+  shell: ['powershell', 'shell_exec', 'terminal_run', 'exec_command', 'spawn_process'],
+  'dynamic-code': ['code_eval', 'js_interpreter'],
+  subagent: ['delegate_task', 'fork_subagent'],
+};
+
+for (const [cap, names] of Object.entries(TOKEN_CASES)) {
+  test(`classifyTool：能力词在后的写法也要归到 ${cap}`, () => {
+    for (const name of names) assert.equal(classifyTool(name), cap, `${name} 应归为 ${cap}`);
+  });
+}
+
+test('classifyTool：会话内的清单/笔记类工具不算 fs-write', () => {
+  // 它们写的是会话状态，碰不到文件系统；按 fs-write 拒掉只会白白废掉无害能力。
+  for (const name of ['todo_write', 'plan_edit', 'note_write', 'memory_save']) {
+    assert.equal(classifyTool(name), 'unknown', `${name} 不该按 fs-write 处理`);
+  }
+});
+
 test('classifyTool：脏输入一律 unknown，不抛错', () => {
   for (const bad of [undefined, null, '', '   ', 42, {}, [], true]) {
     assert.equal(classifyTool(bad), 'unknown', `${JSON.stringify(bad)} 应为 unknown`);

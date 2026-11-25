@@ -751,3 +751,31 @@ startCard('c1') -> 卡片 c1 现在是 done，不能重新开工
 
 这 4 条都很小（迁移函数里几行 + `renderArtifacts` 一处 + `migrate` 一处），建议与 0.1.0 一起发，别留给 0.1.1——
 R1 和 R3 都会造成不可逆后果，而它们的触发前提（存量 v0/v1 文件）恰好是发布后最先出现的东西。
+
+---
+
+## 9. R1–R9 处置记录（Lead 收到 §8 后同一轮内完成）
+
+原始报告与 §8 复核一字未改，下面是逐条处置。**9/9 全部处理**（R1–R8 修掉，R9 补了 10 条用例）。
+`node --test` 从 341 涨到 **352**，全绿；`node scripts/check-docs.mjs` 通过；`node scripts/verify-pack.mjs` 通过。
+
+| # | 处置 | 落在哪 |
+|---|---|---|
+| **R1** | **已修，一处修法解两个入口**。新增导出 `normalizeIds(state)`：不安全的 id（含路径穿越、中文、超长）与重复 id 一律按位置重编号成 `c1/t1…`，变更记进 `state.repairs`；`tech` 项被改名时卡上的 `techIds` 一起改。`upgradeFromV0` 末尾调它，`inspectShape` 也补上 `cards[].id` / `tech.items[].id` 的格式检查 —— 于是 v0 迁移被自动修正，v1 坏文件被 `loadState` **拒载**（不再指望每个调用点自检） | `lib/state.js` |
+| **R2** | **已修**。`migrate` 的 `version === SCHEMA_VERSION` 分支先跑 `inspectShape`，有问题返回 `ok:false` 并指出字段；与 CONTRACT §1.1 一致 | `lib/state.js` |
+| **R3** | **已修**。`choose_build` 分支再跑一次 `checkBudget`：`tech_ok` 那关被绕过（存量迁移 / 手改 state）时，这是最后一道门。实测 50 条 user × 99999 分钟在 `choose_build` 被拒 | `lib/state.js` |
+| **R4** | **已修**。新增内部 `minutesOf(item)`：字符串 `'500'` 按 500 算，缺省 / 非正 / 非数字按 0 算；`checkBudget` 与 `computeSize` 都改用它（`artifacts.js` 本来就是 `Number(item.minutes)`，三处现在同口径）。契约 §3 已补这条 | `lib/state.js`、`docs/CONTRACT.md` |
+| **R5** | **已修，两个层面**。① `tools.renderArtifacts` 在 `verify.hypothesis` 为空但磁盘上还有 `VERIFY.md` 时，重写成一份**显式作废**的说明（写明作废原因），不再留着旧假设；② `plando_transition` 的输出改成只报**真的写下去**的文件，`effects.rerender` 里没兑现的单独列成「本次没有重写」——不再谎报 | `lib/tools.js` |
+| **R6** | **已修**。不再靠严格正则卡死老项目：迁移时把中文 / 超长 id 规范化（`repairs` 留痕），新写入路径仍然严格拒。字符集也写进了 CONTRACT §4「id 字符集（硬约束）」，说明为什么必须 ASCII | `lib/state.js`、`docs/CONTRACT.md` |
+| **R7** | **已修**（与 R1 同一个 `normalizeIds`：`used` 集合按顺序去重，重号的往后找空位）。F3 的死锁对老项目也解开了 | `lib/state.js` |
+| **R8** | **已修**。`cards_done` 与 `revise` 分支先 `filter(isPlainObject)` 再读 `.status` / 写 `.status`，`null` 元素不再变成原始 `TypeError` | `lib/state.js` |
+| **R9** | **已修**。`test/review-state.test.js` 从 26 条补到 **36 条**，逐条以 R 编号开头：迁移后穿越 id 重编号、磁盘坏 id 被 `loadState` 拒、`techIds` 引用跟着改名、v1 坏形状 `ok:false`、迁移后超预算在 `choose_build` 被拒、字符串 minutes 三处同口径、`revise` 清 `verify`、中文 / 超长 id 规范化后仍能走 `choose_build`、重复 id 去重、`cards_done`/`revise` 遇 null 不抛、`VERIFY.md` 真的含假设原文 | `test/review-state.test.js` |
+
+**关于 §8 那句「输出谎报」的补充**：`effects.rerender` 是**意图**不是**结果**，之前的输出把两者当同一件事。
+现在 `plando_transition` 的返回分成两行：`落盘：…`（真的写了）与 `本次没有重写：…`（意图里没兑现的），
+修完 `revise` 的实际输出是 `落盘：IDEA.md、CHANGE-GUIDE.md、VERIFY.md`——`VERIFY.md` 现在确实会写（作废版）。
+
+**关于 R4 的一点说明（避免过度自信）**：`computeSize` 与 `checkBudget` 现在同口径了，但
+`TECH.md` 的渲染走的是 `artifacts.js` 里独立的一次 reduce（本来就是 `Number()`）。
+三处现在算出来的数字一致，**但它们仍然是三份独立实现**——将来改口径要三处一起改。
+真要根治应该抽一个共用函数，本轮没做（`artifacts.js` 的依赖面是刻意保持小的）。

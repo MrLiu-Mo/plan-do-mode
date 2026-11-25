@@ -155,12 +155,50 @@ test('守卫跟随「最近一次 plando_* 用到的 dir」，而不是只看 de
   assert.match(reason, /澄清|clarify/, '守卫应读到别处项目的状态，而不是 defaultProjectDir 的状态');
 });
 
+// 去掉注释再扫：注释里出现 `require('fs')` 这种字面量是极正常的写法，
+// 用行首正则会被误伤（本文件第一版就被一条注释里的 `require('fs')` 卡住过）。
+// 只处理 `//` 与 `/* */`，字符串里的注释符号会被状态机跳开，够用。
+function stripComments(source) {
+  let out = '';
+  let i = 0;
+  let quote = '';
+  while (i < source.length) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (quote) {
+      out += ch;
+      if (ch === '\\') {
+        out += next === undefined ? '' : next;
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = '';
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') quote = ch;
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 test('零依赖静态扫描：lib/*.js 只 import node: 内置模块与相对路径', () => {
   const files = fs.readdirSync(LIB_DIR).filter((file) => file.endsWith('.js'));
   assert.ok(files.length >= 10, `lib/ 下应该有一整套模块，实际 ${files.length} 个`);
 
   // 语句级正则：行首（允许缩进）的 import … from '…'、裸 require( … )、import( '…' )。
-  // 用语句级而不是纯文本搜索：lib/artifacts.js 注释里出现过 "import" 这个词。
+  // 先剥掉注释，避免「注释里提到 require('x')」被当成真的依赖。
   const importFrom = /(^|\n)[ \t]*import[^\n]*?from[ \t]*['"]([^'"]+)['"]/g;
   const bareImport = /(^|\n)[ \t]*import[ \t]*['"]([^'"]+)['"]/g;
   const requireCall = /(^|\n)[ \t]*(?:const|let|var)?[^\n]*?\brequire\([ \t]*['"]([^'"]+)['"]/g;
@@ -168,7 +206,7 @@ test('零依赖静态扫描：lib/*.js 只 import node: 内置模块与相对路
 
   const offenders = [];
   for (const file of files) {
-    const source = fs.readFileSync(path.join(LIB_DIR, file), 'utf8');
+    const source = stripComments(fs.readFileSync(path.join(LIB_DIR, file), 'utf8'));
     for (const pattern of [importFrom, bareImport, requireCall, dynamicImport]) {
       pattern.lastIndex = 0;
       let match;
@@ -184,7 +222,7 @@ test('零依赖静态扫描：lib/*.js 只 import node: 内置模块与相对路
 
   // 另外硬拦真正的裸包名引用（注释里提到包名不算：只在 import 语句里查）
   for (const file of files) {
-    const source = fs.readFileSync(path.join(LIB_DIR, file), 'utf8');
+    const source = stripComments(fs.readFileSync(path.join(LIB_DIR, file), 'utf8'));
     assert.equal(
       /(^|\n)[ \t]*import[^\n]*?from[ \t]*['"]@deepseek-ai\//.test(source),
       false,

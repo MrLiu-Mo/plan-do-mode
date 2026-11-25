@@ -57,6 +57,8 @@ export function formatCard(state, card);        // 单卡：学/做/验三段现
 export function formatTransition(ok, { event, from, to, effects, reason });
 export function formatCheck({ ok, name, exitCode, stdout, stderr, reason });
 export function formatRecover(reason, dir);     // 状态损坏时的恢复指引（CONTRACT §4：绝不重置）
+export function nextActionFor(stage, state);    // 下一步提示；decide + large 未验证时推荐 verify（契约 §3）
+                                                 // tools.js 复用它，别直接查 NEXT_ACTIONS 常量表
 ```
 
 ## 4. `lib/tools.js`
@@ -75,10 +77,12 @@ export const TOOL_NAMES;   // ['plando_idea','plando_project','plando_status','p
 **统一的 `execute` 包装**（tools.js 内部一个函数，8 个工具都走它）：
 
 ```js
-async function run(toolName, args, body) {
-  // 1. 参数形状不对 -> 返回 format.formatError(...) 文本，不抛
+async function run(args, body, deps) {
+  // 1. 参数形状不对 -> 返回 plando 形状的错误文本，不抛
   // 2. body 抛错 -> catch 成 `plando：…——下一步：…` 文本返回（工具永远不把异常抛给模型）
-  // 3. 返回 string
+  // 3. 被拒的调用统一由 logRejection 追加到 .plando/log.jsonl（kind=reject, source=tool）
+  //    日志写失败不影响返回值
+  // 4. 返回 string
 }
 ```
 
@@ -114,5 +118,12 @@ export function apply(ctx, config) { /* 同步 */ }
 
 - **可以缓存路径，不可以缓存状态**。守卫每次调 `getStateContext()` 都重新 `loadState(activeProjectDir)`。
 - 优先级：`runtime.activeProjectDir` → `config.defaultProjectDir` → `null`（→ 由 policy 决定 fail-closed）。
+- **只有 `dir` 解析后确实存在 `.plando/state.json` 才更新 `activeProjectDir`**：
+  随手传一个不存在的目录不该把守卫的观察点挪走（REVIEW-tools G4）。
+  `plando_project action=init` 是例外——它在写盘前还不存在状态文件，所以自己补调一次 `noteActiveDir`。
+- **`dir` 必须是绝对路径**：相对路径会相对进程 CWD 解析，一句 `plando_status {dir:'..'}`
+  就能让守卫去看别的目录；配置里的 `defaultProjectDir` 也按同一规则检查。
 - `classifyTool(undefined)` 归 `unknown` 并放行（INTERFACES §2 语义表）；
   否 —— `subagent` / `dynamic-code` 与 `guardExtraDeny` 点名的仍然拒绝。
+- 分类先看前缀，**前缀没命中再看词元**（`fs_write` / `powershell` / `shell_exec` 这类「能力词在后」
+  的写法否则会被当成 unknown 放行）。`todo_write` / `note_edit` 这类**会话内清单**不算 fs-write。

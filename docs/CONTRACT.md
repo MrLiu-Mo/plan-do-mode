@@ -50,8 +50,14 @@ export function applyEvent(state, event, payload, config);   // -> { ok, state?,
 export function computeSize(items, constraints);             // -> { size, sizeReason, totalMinutes }
 export function checkBudget(items, budget);                  // -> { ok, reason? }
 export function migrate(state);                              // -> { ok, state?, reason? }
+export function inspectShape(state);                          // -> string[]，空数组表示 shape 可用
 export function createInitialState(project);                 // -> state
 ```
+
+`inspectShape` 是读取侧的形状体检：手改、老文件、迁移都可能带进 `null` / 非对象元素，
+流到工具层就变成不可读的 `Cannot read properties of null`。`project.loadState` 在返回
+`ok: true` 前会先跑一次，坏了就报错并指出字段路径，**不重置**（§4 同样的规矩）。
+`migrate` 必须在返回前也让它通过——否则坏 state 会被洗白成当前版本并写回磁盘。
 
 `effects` 是给调用方（tools.js）用的提示，取值固定为下面之一或省略：
 
@@ -80,7 +86,7 @@ export function createInitialState(project);                 // -> state
 | `ship_pass` | ship | done | `offlineOk, selfChange, explain` | 三项都为真/非空 |
 | `drop` | 任意非终态 | dropped | `reason` | `reason ∈ {falsified, parked}`；实际不会有 `inbox` 项目，见 §1 备注 |
 | `revise` | idea / tech / decide / build | tech | `reason` | 非空；受影响卡标 `stale`；重渲染 IDEA.md |
-| `pause` | 任意非终态 | 同阶段 | — | 置 `paused=true` |
+| `pause` | 任意非终态 | 同阶段 | — | 置 `paused=true`。**语义是「守卫层提示先 resume」，不冻结状态机**——暂停期间仍可推进事件，`paused` 保持 `true` |
 | `resume` | 任意非终态 | 同阶段 | — | 置 `paused=false`；未暂停时调它不算错，返回 `{ok:true, noop:true}` |
 | `reopen` | done / handoff / dropped | decide | `reason` | 非空；清 `paused`、清 `terminal` |
 
@@ -150,6 +156,10 @@ PLAN 里 `pick`/`drop` 同时出现在 `plando_idea` 的 action 和状态机的�
 - `items.filter(i => i.owner === 'user').length <= budget.mustUnderstand`
 - `sum(items.minutes) <= budget.totalMinutes`
 - 超了返回 `ok:false`，理由里必须给出「超了多少 / 怎么降级」两个数字。
+- 分钟数以**数字**参与计算：字符串 `'30'` 按 30 算（`minutesOf` 统一归一），
+  缺省 / 非正 / 非数字按 0 算。三处（`checkBudget` / `computeSize` / `TECH.md` 渲染）必须同口径。
+- `choose_build` 会再跑一次预算校验：`tech_ok` 的校验被绕过时（存量 v0 迁移、手改 state）
+  这里就是最后一道门。
 
 规模判定：
 
@@ -217,6 +227,13 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 
 **写盘规则**：先写 `state.json.tmp`，再 `fs.renameSync` 覆盖——多会话共享同一份 state，
 半写文件比报错更糟。
+
+**id 字符集（硬约束）**：`cards[].id` 与 `tech.items[].id` 必须匹配 `^[A-Za-z0-9_-]{1,40}$`。
+原因不是洁癖：卡 id 会被当成文件名渲染成 `.plando/cards/<id>.md`，而 `../../README` 这种 id
+`path.join` 之后仍然落在项目目录内，`writeText` 的边界断言拦不住，用户自己的文件会被覆盖。
+新写入路径（`tech_ok` / `choose_build`）直接拒绝不合规 id；`migrate()` 遇到存量坏 id 会
+按位置重编号（`c1`、`t1`……）并写进 `state.repairs`，同时改掉卡片上的 `techIds` 引用。
+`techIds` 引用的必须是 `tech.items` 里真实存在的 id，且每张卡至少覆盖一项。
 
 **版本**：解析失败、`schemaVersion` 缺失、非整数、或高于当前 `SCHEMA_VERSION` → 报错停止，**绝不重置**。
 已知旧版本目前只有 `0`（视为「早期内部草稿」）：`migrate()` 补齐缺失字段、不覆盖已有值后升到 1。

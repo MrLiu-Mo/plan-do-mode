@@ -145,7 +145,9 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 
 拒绝名单**按能力列、不按记忆列**（名单在 `policy.js`，每条都有测试）：文件写（`write` / `edit` / `str_replace_editor` / `apply_patch`）、命令执行（`bash*` / `pwsh*` / `terminal*` / `shell*`）、动态代码（`run_code` / `code_interpreter` / `notebook*` / `eval*`）、委派（`subagent*` / `workflow` / `task`）。前缀匹配覆盖带后缀的变体；`config.guardExtraDeny` 允许用户追加工具名。这条名单与市场索引的能力词表对齐（`fs-write` / `shell` / `dynamic-code` / `subagent`），避免出现「市场标了能力、守卫却没拦」的缺口。
 
-**配置/脚手架**（唯一例外）：`plando_scaffold` 按文件名白名单放行（精确名单，仅限项目根：`package.json`、`tsconfig.json`、`vite.config.js`、`vite.config.ts`、`index.html`、`.gitignore`、`.env.example`、`README.md`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），且必须对应 `归属=ai` 的 TECH 项。名单是**白名单不是黑名单**：不在表里的路径一律拒绝，不做通配推导——v1 宁可少放行，也不给「文件名一改就绕过」留口子。
+**配置/脚手架**（唯一例外）：`plando_scaffold` 按文件名白名单放行（精确名单，仅限项目根，v1 实装 7 项：`package.json`、`tsconfig.json`、`.gitignore`、`.env.example`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`），且必须对应 `归属=ai` 的 TECH 项。名单是**白名单不是黑名单**：不在表里的路径一律拒绝，不做通配推导——v1 宁可少放行，也不给「文件名一改就绕过」留口子。
+
+> 初稿名单有 11 项，实测后砍掉 4 项：`vite.config.js` / `vite.config.ts` 是可执行 JS，写进去就能被 `node vite.config.js` 跑起来，等于开了一个任意代码入口；`README.md` / `index.html` 是**用户的内容文件**不是配置文件，替用户写等于代写。内容维度也要校验：`package.json` 的 `scripts` 只认 `test` / `build` / `lint` 这类键，`postinstall` 之类的生命周期钩子一律拒（否则「AI 不代写」变成「AI 在你机器上预埋一条命令」）。见 `docs/REVIEW-tools.md` G2 / L5。
 
 **读**永不拦：AI 要读用户写的代码才能验收。
 

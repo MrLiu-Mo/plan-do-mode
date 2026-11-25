@@ -52,8 +52,9 @@ function isClean(dir) {
   return out.trim() === '';
 }
 
-test('ARTIFACT_PATHS 白名单固定为契约里的 5 项，且不含 -A / 任意路径', () => {
-  assert.deepEqual([...ARTIFACT_PATHS], ['IDEA.md', 'TECH.md', 'HANDOFF.md', 'CHANGE-GUIDE.md', '.plando']);
+test('ARTIFACT_PATHS 白名单固定为契约里的 6 项，且不含 -A / 任意路径', () => {
+  // VERIFY.md 曾经漏掉：verify 阶段渲染了它但 autoCommit 不带，留成 `?? VERIFY.md`（REVIEW-tools L6）。
+  assert.deepEqual([...ARTIFACT_PATHS], ['IDEA.md', 'TECH.md', 'VERIFY.md', 'HANDOFF.md', 'CHANGE-GUIDE.md', '.plando']);
   assert.equal(ARTIFACT_PATHS.includes('-A'), false);
   assert.equal(ARTIFACT_PATHS.includes('.'), false);
 });
