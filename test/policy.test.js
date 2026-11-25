@@ -201,6 +201,13 @@ test('守卫：暂停状态把 resume 写进拒绝理由', () => {
   assert.match(reason, /resume/);
 });
 
+test('守卫：暂停理由不能说成「必须先 resume」——契约 §2 的暂停不冻结状态机', () => {
+  const reason = guardOf(ctx({ paused: true }))({ name: 'write' });
+  // 断言「不冻结」这句在，且没有把 resume 写成硬前提的措辞。
+  assert.match(reason, /不冻结/, '暂停语义要跟契约 §2 一致：' + reason);
+  assert.doesNotMatch(reason, /先传 plando_transition event=resume 恢复，再按阶段推进/, '这句把暂停说成了硬前提：' + reason);
+});
+
 test('守卫：单调性——同一守卫连续调用结果稳定，且不修改 deps 返回的对象', () => {
   const state = ctx();
   const snapshot = JSON.stringify(state);
