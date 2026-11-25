@@ -295,7 +295,7 @@ v1 包就在仓库根（`npm publish` 从根发，`github:owner/repo` 也要求�
 | 状态读不出时守卫 | 写类工具 fail-closed，只读放行 |
 | 预设 id 已被占用 | 装前检测 `preset-plan-do` 冲突，报错并给出改名指引，不覆盖 |
 | 卸载 / 重装 | preset 与工具消失，`~/.plando`、项目 `.plando/` 与已渲染产物保留 |
-| DSH 版本不兼容 | `apply()` 特性探测：拿不到 `ctx.tools.guard` 时降级为「无守卫」并显式警告，不崩溃 |
+| DSH 版本不兼容 | `apply()` 特性探测：拿不到 `ctx.tools.register` 或 `ctx.tools.guard` 时**抛错拒绝加载**（宁可挂不上，也别假装拦住了——见 API-FACTS §1）。降级成「无守卫」等于把不代写变成空话，不做 |
 
 ## 十二、明确不做（本版）
 
