@@ -1817,3 +1817,365 @@ node $env:TEMP\plando-review\check-tables.mjs    # 报告自身的表格列数�
 - `--watch` / `--inspect-brk` 会让检查挂满 60 秒超时（有超时兜底，不是安全问题）。
 - `deno run x.ts` / `bun run x.ts` 放行：这两个解释器的核心用法就是执行文件，argv 上无法与「跑检查」区分。
 - 三处 `minutes` 计算仍是独立实现（口径已统一，没抽公共函数）。
+
+---
+
+## 14. §13 处置的复核：R1/R3 是「部分闭合」，R2 是真闭合，但 R1 的修法开了一个**新的高危洞**
+
+> 这一节是我对 **`a5bf3f2`** 那棵树的独立复核（`HEAD = 53d51d1` 时复跑，`lib/`、`test/` 自 `a5bf3f2` 起**零改动**，已用 `git diff --name-only a5bf3f2 -- lib/` 验过；`node --test` **390 passed / 0 failed**）。
+> **§10–§13 一个字都没动。判决仍是 §6 的 fix-first，本节的结论不改变判决、只改变「哪几条能算闭合」。**
+> 全部结论都有可复现的命令；探针脚本在 `%TEMP%\plando-review\`（`probe-final14b.mjs` 一次跑齐本节所有数字）。
+
+### 14.1 三条处置的判决（先给结论）
+
+| # | §13 的声明 | 我的复核 | 判决 |
+|---|---|---|---|
+| **R1** | `npx` 判据改成 `KNOWN_TOOLS ∪ ALLOWED_COMMANDS`，「已闭合」 | 它宣称的两件事**都属实**（见 14.2），但这条修法把 `npx` 变成了一个**通用洗白前缀**：`node -e "1"` 拒、`npx node -e "1"` 放行；`npm install x` 拒、`npx npm install x` 放行。**360 组「`npx` + 工具 + 危险参数」里 360 组全放行**，其中 **260 组是这一轮从「拒」变成「放」的** | **部分闭合 → 新开 R5【高】** |
+| **R2** | `--env-file` 值必须是项目内相对路径 | 逐条验过：3 条合法写法全放行，8 条越界写法（绝对路径 / 盘符 / `..` / UNC / `\\?\` / 分离形式 / 空值 / 大小写）全拒；经 `npm test -- --env-file=…` 转发也拒；几种「放行但 node 不认」的畸形值实测 `exit=9`，读不到东西 | **✅ 闭合** |
+| **R3** | ① `cards_done` 要求至少一张 `done`；② `downgrade` 理由复用 `checkEvidenceObservable` | ① 属实且有效，② **只等于加了个「≥4 字」的最小长度**：判别力实测误放行 **28/36 = 78%**；更要紧的是**「一张 `done` + 其余降级」这条路仍能零产出到 `done`**，因为唯一那张 `done` 卡可以拿 `kind:'files'` 的假证据（M4 只对账 `kind:'check'`） | **部分闭合 → R7【中】** |
+
+### 14.2 R1 声称的两件事，确实属实（先给它记功）
+
+`probe-final14b.mjs` 第 1 段：
+
+```
+裸名 ⟺ npx 裸名：36 个工具，不一致 0            ← §13 加的等价断言真的生效了
+「裸名+危险参数」⟺「npx 裸名+同一参数」：360 组，放行 360 组
+  其中「修前拒 → 修后放行」260 组
+反例：node -e "1" → 拒绝；npx node -e "1" → 放行   ← 断言只覆盖了左边一半
+```
+
+（探针里那行标签写的是「裸名+危险参数」，实际统计的是 `npx <工具> <危险参数>`——它测的是加 `npx` 之后参数还过不过检查，结论是**不过**。）
+
+§12 R1 指出的镜像怪相（`npx vite build` 放行 / `npx next build` 拒 / 去掉 `npx` 又放行）**确实修好了**：36 个工具逐个验「裸命令放行 ⟹ `npx <它>` 也放行」，不一致 0 个。这条功劳要给。
+
+**问题是断言的形状选错了。** §13 写的教训是「名单一漂移就加等价断言」，但这次加的断言是：
+
+> `X` 放行 ⟺ `npx X` 放行（**只比较第一个 token**）
+
+它保证了「加 `npx` 不改变结论」，**恰恰把「后面的参数也要过同一套检查」这件事一起丢掉了**。第一版 `npx` 分支只查包名（当时的判据是「包名 ∈ `KNOWN_TOOLS`，只有 11 项」），`node` / `python` / `npm` 都不在里面，所以 `npx node -e` 是**被包名挡下的**——纯属幸运。这一轮把并集扩到 36 项，`node`、`python`、`npm`、`cargo`、`java` 全进了白名单，那道幸运的闸门就同时打开了。
+
+### 14.3 R5　`npx` 变成通用洗白前缀　【高，本轮引入】
+
+#### 复现（`probe-r7-final.mjs`，3 次调用，用户零操作）
+
+```
+build 阶段，c1 是正常流程里的一张卡
+
+① plando_card { action:'declare', dir, id:'c1',
+     command: `npx -y node -e "require('fs').writeFileSync('PWNED-AI.txt','AI 通过 plando_check 执行了任意代码')"` }
+   → 已为卡片 c1 声明检查命令：npx -y node -e "…"        ← 放行
+
+② plando_check { action:'run', dir, name:'c1' }
+   → · 检查 c1：通过｜退出码 0
+
+③ 项目根目录生成了 PWNED-AI.txt = true
+   内容：AI 通过 plando_check 执行了任意代码
+
+④ plando_card { action:'done', evidence:{kind:'check', summary:'跑了检查，退出码 0'} }
+   → 卡片 c1 已 done。                                    ← M4 对账也过了（因为真的跑了）
+```
+
+同一条命令**去掉 `npx`** 是拒的（`node -e "1"` → 「命令里的「-e」会让检查变成任意代码」）。也就是说：**加一个 `npx` 前缀，G1 那一整套解释器检查全部失效。**
+
+#### 广度：不是几种特例，是整类
+
+`probe-list.mjs` / `probe-final-nums.mjs` 的 360 组矩阵，按危险参数分组看，**每一组都是 36 个工具全放行**（36 × 10 = 360，无例外）：
+
+```
+参数形态        放行工具数   其中「修前拒 → 修后放行」
+-e "1"             36/36              26
+--eval="1"         36/36              26
+-c "1"             36/36              26
+eval "1"           36/36              26
+install x          36/36              26
+add x              36/36              26
+ci                 36/36              26
+exec x             36/36              26
+run x              36/36              26
+run -e "1"         36/36              26
+```
+
+那 10 个「修前就放行」的是 `tsc vitest jest mocha eslint prettier ruff mypy black vite`——它们本来就在旧的 11 项 `KNOWN_TOOLS` 里，所以 `npx tsc -e` 之类的漏洞**在本轮之前就存在**；本轮把另外 26 个也拉了进来。
+
+变松的 26 个工具：`node python python3 py pytest pip cargo go dotnet java mvn gradle deno bun uv next react-scripts webpack rollup esbuild parcel nodemon pm2 tsx ts-node serve`。
+其中 14 个是**执行者**而不是构建工具（`node python python3 py pip cargo go dotnet java mvn gradle deno bun uv`）。
+
+#### 严重性：这条路不需要「项目里先有那个文件」（这是它比 R4 严重、也比 R2/R3 更直接的原因）
+
+`probe-npx-cold.mjs` 用**全新空缓存**（`npm_config_cache` 指到一个空目录）验过：
+
+```
+npx tsx -e "…"          exit=0  落盘 = T1.txt        ← 冷缓存、无 -y，自动下载并执行
+npx -y node -e "…"      exit=0  落盘 = T4.txt
+npx npm install cowsay  exit=0  装了 41 个包          ← npm 是本地真二进制，连下载都不需要「先装」
+npm test（scripts.test = npx tsx -e "…"） exit=0      ← 走得通
+```
+
+以及 `probe-r7-escape2.mjs` 验过它能把三件事都做出来：
+
+```
+① 读进程环境变量（假 token = sk-live-DEADBEEF…）  → stdout 里出现 token = true
+② 写项目外的绝对路径 %TEMP%\plando-victim.txt      → 项目外文件生成 = true
+③ require('child_process').execSync('echo … > f') → shell marker 文件生成 = true
+```
+
+对照 R2（`--env-file`）：R2 只**读**、而且需要模型知道项目外路径、而且读出的是 `.env` 的内容。
+R5 是**任意代码执行**，一条 `-e` 就够，不受「项目内相对路径」约束，也不需要项目里预先有 `.js`（§11 对 R4 的取舍理由在这里完全不成立——`-e` 的代码就在命令行上，不需要文件）。
+
+**准确的前提条件**（不夸大）：`npx` 要先能拿到那个包——要么联网（`probe-npx-cold.mjs` 用空缓存实测：`npx tsx -e` 打印 `The following package was not found and will be installed: tsx@4.23.15` 后执行成功），要么项目 / 上级目录的 `node_modules` 里已经装了它（`probe-r5offline.mjs` 模拟「项目里已装 tsx」，**全程离线**成功：`npx tsx -e` → 落盘 → `done` 通过）。前端 / TS 项目里 `tsx` / `vitest` / `vite` 是常态，所以第二种情况并不罕见。而 `npx npm …` 里的 `npm` 是本地真二进制，不需要下载它本身。
+
+#### 最重的一条：G2 的完整链**复活了**
+
+§9.3 记的那条链是「AI 埋命令（`plando_scaffold` 写 `package.json` 的 `scripts`）→ AI 自己执行（`plando_check`）→ AI 自己收尾」，用户在中间零操作。§9.6 修完之后它应当是断的。用 `npx` 洗白层重做一遍（`probe-g2-full.mjs`）：
+
+```
+① plando_scaffold package.json, scripts.test = `npx tsx -e "require('fs').writeFileSync('AUTORUN-FULL.txt','AI 自己跑的')"`
+   → 已写 package.json。                                  ← scaffold 放行（denylist 只认 node/python，不认 tsx）
+② plando_card declare  npm test                            → 已为卡片 c1 声明检查命令
+③ plando_card start    c1                                  → 卡片 c1 已 start
+④ plando_check run     c1                                  → · 检查 c1：通过｜退出码 0
+   AUTORUN-FULL.txt 生成 = true：AI 自己跑的
+⑤ plando_card done     (kind:'check', '跑了 npm test，退出码 0')  → 通过（M4 也认了）
+⑥ cards_done                                                → 已推进：build → ship
+⑦ ship_pass { offlineOk:true, selfChange:true, explain:'检查都过了' }  → 已推进：ship → done
+
+阶段 = done
+项目文件 = ["AUTORUN-FULL.txt","IDEA.md","TECH.md","package.json"]
+用户自己写的业务文件 = []        ← 一个都没有
+```
+
+**§9.3 修完的那条链，换个 `npx` 前缀就完整回来了**，而且这次连「`.js` 得先在项目里」都不需要。这已经不是「白名单漂移」级别的瑕疵，是「AI 不代写」这条产品承诺被绕穿。
+
+`scaffold` 那一层也跟着漏，`probe-final14b.mjs` 第 3 段（同一份判据，修前 / 修后对照）：
+
+```
+npx tsx -e "1"               修前=拒  修后=放     ← 洗白层把它带过了 SCRIPT_VALUE_DENY
+npx npm install cowsay       修前=拒  修后=放
+npx -y node -e "1"           修前=拒  修后=拒     ← 这条侥幸还被 /node\s+-e/ 兜着
+python -X utf8 -c "1"        修前=拒  修后=拒     ← §9.3 的老 payload 仍然拦得住
+```
+
+注意最后两行：**老洞确实还堵着**，漏的是「denylist 认识的解释器」之外的形态。`tsx` / `ts-node` / `npm` 都不在 `SCRIPT_VALUE_DENY` 里。
+
+#### 附带的第二个洞：`npx` 的 `@` 切分把 spec 语法切掉了
+
+`npx` 分支用 `String(known).replace(/@.*$/, '')` 取包名，于是 npm 的别名 spec 直接穿过白名单（**这一条修前修后都放行，是 §12 之前就有的老洞**）：
+
+```
+放行  npx vitest@npm:cowsay      → 真跑 npx -y vitest@npm:cowsay ALIAS-RAN，输出真的是 cowsay 的 <ALIAS-RAN>
+放行  npx vitest@file:../../evil
+放行  npx vitest@github:user/repo
+```
+
+`@npm:` 让「包名 ∈ 白名单」这个判据**本身**失效——包名合法、实际执行的是另一个包。这条单独记成 **R8【中，老洞】**：即使把 R5 修好（`npx` 后面的参数也过检查），只要包名匹配还允许 `@` 别名，`npx vitest@npm:任意包` 依旧是一条现成的下载执行路径。
+
+#### R5 的修法（建议）
+
+不是「把 `npx` 再列一份黑名单」，而是**把 `npx` 当成透明的**：
+
+1. `npx <工具> <参数…>` 剥掉 `npx`（和 `-y` / `--yes` / `-p` / `--package`）之后，把**剩下的 argv 当一条独立命令重跑一遍 `validateCommand`**——`node -e` 拒、`cargo run` 拒、`npm install` 拒，全部自动跟着；
+2. 包名 / spec 判定改成「`@` 之前的部分必须在白名单里，**并且** `@` 之后只能是版本号（`\d`、`^`、`~`、`*`、`latest`、`next`、`beta` 这类），出现 `npm:`、`file:`、`git`、`http`、`/`、`\` 一律拒」——这条同时关掉 R8；
+3. 补断言：**对同一个工具，「裸名 + 参数集合 P」的结论必须与「`npx` 裸名 + 同一 P」一致**（不是只比裸名）。§13 那条断言只做了 P 为空的特例，改成全 P 才能拦住这一类。
+
+### 14.4 R2：这次是真闭合（把边界写清，免得下轮再当新发现）
+
+`probe-r2-1.mjs` / `probe-r2f.mjs` / `probe-final14b.mjs` 第 7 段：
+
+```
+放行  --env-file=.env / ./config/.env / --env-file-if-exists=.env        ← 合法姿势保住了，误杀 0
+拒绝  --env-file=C:\Users\me\.env / /etc/passwd / ../.env / ../../.env
+拒绝  --env-file=\\?\C:\Users\me\.env / \\server\share\f.env / C:.env / D:/x/.env
+拒绝  --env-file（分离形式）/ --env-file=（空值）/ --ENV-FILE=../.env（大小写变体）
+拒绝  npm test -- --env-file=C:\x\.env / npm test -- --env-file=../.env / pnpm test -- --env-file=…（转发形态）
+```
+
+**实测没有绕过。**`probe-r2-2.mjs` 把 8 种「看着像相对路径其实想穿出去」的写法（`..%2FSECRET.env`、`....//`、`.../.../`、`%2e%2e\`、`.. /SECRET.env` 等）逐个**真跑 node**，结论一行：
+
+```
+以上候选里真的读到项目外文件的：没有
+```
+
+原因是这些畸形值 node 自己就不认（`--env-file=..%2F.env` → `exit=9`、`bad option`），不是被校验器放过了。校验器放行的 `.env` / `./x/.env` 都老老实实落在项目内（对照跑出 `TOPSECRET=inside-project`）。
+
+**残留（低，不算洞）**：`--env-file=.`、`--env-file=..%2F.env`、`--env-file=.env..` 三个值仍「放行」，但 node 全部 `exit=9` 拒绝执行，读不到任何东西。若要做到字面严丝合缝，可以再补一条「值里不许出现 `%`」——但**不是安全缺口**，只是文案洁癖。
+
+**另一个方向上的残留（低）**：项目内若有指向项目外的**符号链接**（`linked.env → ../SECRET.env`），校验器只看字符串、看不到 inode，会放行。本机无权限造软链接无法实测，且 `scaffold` 只能写普通文件（`validateContent` 对 `vite.config.js` 之类都拒），AI 自己造不出这个前提 ⇒ 归「用户环境先决」，不是本轮引入，也不值得为它加 `realpath`。
+
+### 14.5 R3：全降级堵住了，但「一张 `done` + 其余降级」这条缝还在　→ R7【中】
+
+#### ② 属实：全卡降级现在真的被拒
+
+`probe-r3-1.mjs` A 段：
+
+```
+2 张全降级 → cards_done
+  返回：plando：现在是「边做边学」阶段，2 张卡全部降级了，一行都没跑通——下一步：至少把一张卡真的做到 done（带证据）…
+  stage 仍是 build = true
+```
+
+理由、下一步、`drop` 出口都在，形状对。**这一半闭合，记功。**
+
+#### 但缝还在：唯一那张 `done` 可以拿 `kind:'files'` 的假证据
+
+`plando_card done` 的两条路：
+
+- `kind:'check'` —— 有 M4 对账（对着 `.plando/last-check.json` 比 `name` / `ok` / `exitCode`），**实测有效**：从没跑过时拒、跑失败时拒、别的卡的记录也拒；
+- `kind:'files'` —— **完全不对账**，只过 `checkEvidenceObservable(summary)`，也就是「≥4 字 + 不是纯空话」。`doneCard` 里没有任何文件系统访问。
+
+`probe-r3-1.mjs` B/C/D 段（`kind:'files'` 的证据全部通过）：
+
+```
+"写了 src/app.js，add 函数在第 3 行"            → 通过
+"创建了完全不存在-abc123.py，第 5 行是 main"      → 通过
+"删了 node_modules 下的 500 个包"               → 通过
+"改名 README.md 为 README-old.md"              → 通过
+```
+
+于是端到端（`probe-r3-1.mjs` D 段；`probe-r3c.mjs` 是同一结论的骨架版）：
+
+```
+1 张 done（kind:'files' 假证据）+ 2 张 downgraded
+  → cards_done：已推进：build → ship
+  → ship_pass → stage=done
+  → 文件 = ["IDEA.md","TECH.md"]，项目里没有 src/，没有一行用户代码
+```
+
+**R3 的原始症状（零产出到 `done`）只被堵住了「全部降级」这一种形态，混合形态照样能到 `done`。** 而 `kind:'files'` 恰好是 M4 覆盖不到的那一半——§12 R3 里我写的是「M4 的两个残余中，全卡 downgrade 更值得修」，Lead 修了它，但**没修与它相邻的 `kind:'files'`**，两者串起来就是同一条缝。
+
+#### 降级理由那个检查：实测等于「≥4 字」
+
+`probe-final14b.mjs` 第 5 段，36 条**应当被拒**的坏理由（24 条懒理由 + 12 条 ≥4 字纯空话）：
+
+```
+懒理由（24 条）：放行 21，拒绝 3（长度 3 / 空话 0 / 其它 0）
+纯空话 ≥4 字（12 条）：放行 7，拒绝 5（长度 0 / 空话 5 / 其它 0）
+真理由（12 条）：放行 12，拒绝 0
+→ 误放行 28/36 = 78%
+→ 误杀 0/12 = 0%
+→ 被拒的里靠「长度」拦下的占 3/8
+'时间不够' → **放行**
+```
+
+逐条实测（`probe-r3d.mjs`）：
+
+```
+放行  "时间不够" / "来不太及" / "有点困难" / "太麻烦了" / "先不管它" / "以后再说"
+放行  "下个版本" / "暂时搁置" / "资料没找到" / "没必要做" / "别人做过了" / "下次再做"
+放行  "完成了呢" / "搞定了啦" / "全弄好了" / "一切都好" / "弄好了呀" / "差不多吧"
+拒绝  "x"(1字) / "我懂了"(3字) / "完成了"(3字) / "没问题"(3字) / "跳过"(2字)  ← 全是长度拦的
+拒绝  "都做完了" / "已经实现" / "基本搞定" / "全部实现" / "全部完成"          ← 这 5 条才是空话规则拦的
+```
+
+**结论：`checkEvidenceObservable` 用在 evidence 上勉强合理（那里上面还有 M4 兜底），单独拿来当「降级理由」的判据时，判别力约等于一个最小长度。**「时间不够」里没有任何填充词可删，所以删词规则对它无效；而它恰恰是 §12 举的那个例子。
+**好消息：误杀 0/12**——真理由（「只跑通 demo，保存功能没做」「API key 没申请下来，先用假数据顶」）一条都没被误伤。所以这条**不需要回滚**，只需要补上真正要判的东西。
+
+#### R3/R7 的修法（建议，按性价比排序）
+
+1. **`kind:'files'` 也要能核对**（最便宜、收益最大）：`doneCard` 已经是 `(state, id, evidence, options)`，把 `options.dir` 一起传进来即可——summary 里出现且**项目里存在的路径**至少要有一个（用正则抽 `[\w./-]+\.\w+` 再 `fs.existsSync`），一个都对不上就拒，理由写「你说的这些文件都不在项目里」。这条同时把「一张假 `done` + 其余降级」的缝堵死，因为假 `done` 过不去了。
+2. **`cards_done` 的门槛再抬一格**：不只要求「至少一张 `done`」，还要求「至少一张 `done` 的证据里引用了项目里真实存在的文件」。理由同 §12：这个模式的失败形态是「用户以为交付了东西」。
+3. **降级理由改成「必须提到一个具体对象」**：抽不出 `[\w./-]+\.\w+` 或「某个卡/功能名」就拒。这条会把「时间不够」拦下，误杀率还可以接受（真理由 12 条里 10 条带具体名词，带上的全过）。
+4. 三条都要配「反向断言」：把本节这 36 条坏理由 / 3 条假 files 证据写进 `test/`，当 fixture 跑——否则下轮又会「修好一处、漏邻座」。
+
+### 14.6 顺带回答 Lead 的两问
+
+#### 「N19 是不是真整类？」→ **对 node 内建是整类；跨工具不是**
+
+`probe-r6.mjs` / `probe-final14b.mjs` 第 7 段，真跑 node 24 的四个内建报告器，**逐个看项目目录有没有新文件**：
+
+```
+node --test --test-reporter=lcov                              exit=0  落盘=无
+node --test --test-reporter=junit                             exit=0  落盘=无
+node --test --experimental-test-coverage                      exit=0  落盘=无
+node --test --experimental-test-coverage --test-reporter=lcov exit=0  落盘=无
+WRITE_FILE_FLAGS 9/9 全拒 = true
+```
+
+**Lead 担心的「只堵了显式路径、没堵默认路径」不成立**：node 24 的内建 reporter / coverage **只写 stdout，不落盘**，`--experimental-test-coverage` 也不写 `.nyc_output`，`--test-reporter=lcov` 自己不写 `coverage/`。所以 N19「整类拒写文件开关」在 node 内建这一族上是完整的：**显式路径被 `WRITE_FILE_FLAGS` 收掉，默认路径本来就不写**。**N19 判闭合，这一半验得过。**
+
+**但「整类」这个词跨到别的工具就不成立了**——见下面 R6。
+
+#### 「R3 一条 `done` + 其余降级算不算放行？」→ **算，而且这是现在最短的零产出路**
+
+见 14.5。单卡场景也要小心：只有 1 张卡时，「至少一张 done」这个条件等价于「这一张必须 done」，而这张 `done` 只要一句假 files 证据就能过。
+
+### 14.7 R6　其它工具「换目录 / 指定输出路径」的参数**全部放行**　【中，老洞】
+
+修前修后都一样（`probe-attrib.mjs`），所以**不是本轮引入**，但它和 R2 是同一类问题，既然 R2 已经修了，这里要一并记：
+
+```
+放行  npm test --prefix=<项目外>          ← 真跑：项目外的 package.json 被找到，脚本在项目外生成了 PWNED.txt
+放行  npm --prefix=<项目外> test          ← 同上
+放行  npm test --cache=<项目外>           ← 真跑：项目外生成了 _logs / _update-notifier-last-checked
+放行  npm test --userconfig=<项目外> / --workspace=<项目外>
+放行  yarn test --cwd=<项目外>
+放行  tsc --outDir <项目外> -b
+放行  eslint --output-file=<项目外> . / jest --json --outputFile=<项目外>
+放行  go test -C <项目外> / go test -o <项目外>
+放行  cargo test --manifest-path=<项目外> / --target-dir=<项目外>
+放行  dotnet test --results-directory <项目外>
+放行  mvn -Dmaven.repo.local=<项目外> test
+放行  python -X pycache_prefix=<项目外> -m pytest     ← 真跑：项目外目录被写进 .pyc
+放行  node --openssl-config=<项目外> / --icu-data-dir=<项目外>（注：`--diagnostic-dir` 已被 `WRITE_FILE_FLAGS` 拒）
+放行  node --test <项目外目录> / pytest <项目外目录> / java -cp <项目外>
+→ 放行 20/20
+```
+
+其中三条**端到端验过能真的越界**：
+
+- `npm --prefix`（`probe-r5-e2e.mjs`）：`declare` 放行 → `plando_check run` 真的执行了**项目外**那个 `package.json` 的 `scripts.test` → 项目外生成了 `PWNED.txt`（自己项目里没有）→ 凭这条检查 `done` **通过**。
+- `python -X pycache_prefix`（`probe-pycache.mjs`）：项目外那个空目录被放进去了 `.pyc`。
+- `node --test <项目外文件>`（`probe-r5-3.mjs`）：`declare` 放行 → 跑的是项目外的测试文件 → 退出码 0 → **能拿它当 done 的证据**。
+
+**这一族比 R2 更宽**：R2 是「读」，R6 里 `--outDir` / `--output-file` / `--target-dir` / `pycache_prefix` / `--cache` 都是**写**，恰好是 N19 想堵的那一类，只是没堵到 node 之外。
+
+**修法建议**：不要为每个工具列一份开关表（必然再漂移）。抽一个统一的「路径类参数」判定：**凡是 `--xxx=<值>` 且值里出现盘符 / 绝对路径 / `..` 的，一律拒**——无论 `xxx` 叫什么。这会误杀极少（合法的 `--prefix=.` 之类可以放行项目内相对路径，和 R2 同一套规则复用）。`npm --prefix` / `--cache` 这种「分离形式」也一样处理。
+
+### 14.8 回归：这一轮有没有把已经关上的东西弄坏
+
+| 项 | 结果 |
+|---|---|
+| §9.6.2 那 23 条常见 build 写法 | **误杀 0/23**（`vite build` / `npx next build` / `cross-env NODE_ENV=production vite build` / `rimraf dist && vite build` / `webpack --mode production` … 全放行，`npx next build` 这条上轮唯一的误杀也没了） |
+| §9.3 那 8 条攻击 payload | **仍放行 0/8**（`python -X utf8 -c`、`npm ci`、`npx evil-pkg`、`bash -c`、`NODE_OPTIONS=…` 全拒） |
+| G1 那 14 条 | **漏 0/14**（`node -e`、`cmd /c`、`node --require=…`、`pip install`、`cargo run`、`java -jar` … 全拒） |
+| `npx` 合法用法 | 7/7 放行（`npx node --test` / `npx vite build` / `npx vitest run` / `npx tsc -b` / `npx eslint .` / `npx next build` / `npx webpack`） |
+| 写开关整类 | 9/9 全拒 |
+| `&&` 分档 / 友好壳 | 无变化（`rimraf dist && vite build` 放、`npm ci && node exploit.js` 拒） |
+| `node --test` | 390 passed / 0 failed |
+
+**没有回归。上一轮修好的都还是好的。** 问题全在「新开的」和「没覆盖的」上。
+
+### 14.9 本节新增的残余（R5–R8），以及和 §12 那张表的关系
+
+| 编号 | 内容 | 严重度 | 归因 | 建议 |
+|---|---|---|---|---|
+| **R5** | `npx` 是通用洗白前缀：`npx node -e` / `npx npm install` / `npx tsx -e` / `npx npx …` 全部放行；360 组危险组合 100% 放行，其中 260 组是本轮从「拒」变「放」；G2 的完整「埋命令 → 自己执行 → 自己收尾 → done」链借此复活，用户零操作、项目里零业务文件；前提只要「联网」或「项目里已装该工具」二者之一 | **高** | **本轮引入**（`a5bf3f2`） | 见 14.3：`npx` 透明化 + 全参数等价断言 |
+| **R6** | 20 类「换目录 / 指定输出路径」参数全放行（`npm --prefix`、`--cache`、`tsc --outDir`、`eslint --output-file`、`go -C`/`-o`、`cargo --target-dir`、`dotnet --results-directory`、`python -X pycache_prefix`…），其中 3 条端到端验过能越界读/写 | 中 | **老洞**（修前修后一致） | 见 14.7：统一「路径类参数」判定，与 R2 共用规则 |
+| **R7** | ① 唯一一张 `done` 可用 `kind:'files'` 假证据 → 「1 done + N 降级」仍零产出到 `done`（`kind:'files'` 无任何文件系统核对）；② 降级理由检查实测判别力 ≈「≥4 字」，坏理由误放行 28/36 = 78%，但**误杀 0/12** | 中 | 本轮新增（② 是本轮加的，① 是 M4 的未覆盖半边） | 见 14.5：`kind:'files'` 也核对、`cards_done` 抬门槛、理由要求具体对象 |
+| **R8** | `npx` 用 `replace(/@.*$/, '')` 取包名 → `npx vitest@npm:cowsay` 真跑的是 cowsay（实测输出 `< ALIAS-RAN >`）；`@file:` / `@github:` / `@git+https:` 同样放行 | 中 | **老洞**（修前修后一致） | 见 14.3 第 2 条：`@` 之后只许版本号 |
+| R2 残留 | `--env-file=.` / `..%2F` / `.env..` 放行但 node 不认（`exit=9`）；项目内软链接指向项目外（本机无法造，AI 也造不出） | 低 | — | 不用修 |
+| R4 | `node evil.js` 及其串联 | 低 | 老洞，§11 已有取舍 | 维持 |
+
+**有一点要说清楚**：R1 被标成「已闭合」，实际是「它宣称的两件事都属实，但修法本身开了一个更严重的洞」。这种「修完比修之前更差」不是第一次——§9.6.2（白名单收紧 → 误杀 9/22）、N19（修 `--test-reporter` → 写出任意文件）都是同一个模式：**每一轮的修法都比上一轮更靠近「正确」，但每一轮都新开一个邻座**。这次邻座是 R5，而它比它要修的 R1 严重得多。
+
+### 14.10 判决是否改变
+
+**不变，仍是 §6 的 fix-first，v0.1.0 现在不能发。**
+
+区别只在「哪几条能算闭合」：
+
+- **R2 真闭合**（这是三轮里第一件没有副作用的修复，值得记一笔）；
+- **R1 部分闭合**，且**因为它的修法新开 R5（高）**——R5 是目前整个 `checks.js` 里最严重的一条，比 §1 里任何一条都更容易触发（一条 `npx -e`，不要求项目里先有 `.js`——这正是 §11 给 R4 的免责理由失效的地方）；
+- **R3 部分闭合**（全降级堵住了，混合形态和 `kind:'files'` 还开着）；
+- **N19 在 node 内建范围内真闭合**（默认路径这一半验过了），跨工具另有 R6（中，老洞）。
+
+**一句话：这一轮修的三个里，一个真闭合、两个部分闭合，而且引入了一个比它们都严重的 R5。** 判 fix-first，§6 一字不改。
+
+### 14.11 给下一轮的三条建议（按「修一次能关掉几条」排序）
+
+1. **先把 R5 修掉**（`npx` 透明化 + 全参数等价断言 + `@` spec 限制）。这一条同时关掉 R5 和 R8，并且让 G2 那条链重新变成断的——**它自己不依赖任何别的修复**，也不引入误杀（合法写法 `npx vite build` 剥掉 `npx` 之后就是 `vite build`，本来就放行）。
+2. **再把 R6 收进来**（统一路径类参数判定）。和 R2 复用同一套规则，一次能把 20 类参数一起关掉，误杀风险低（项目内相对路径照旧放行）。
+3. **最后修 R7**（`kind:'files'` 核对 + `cards_done` 抬门槛 + 理由要具体对象）。这条不影响安全，但它是「用户以为自己交付了东西」的唯一出口，产品意义上和 R5 同级。
+
+**别再做「补一份名单」的修复了。**三轮下来，每一次「补名单 / 加一条开关」都新开一个邻座（白名单 → 误杀；reporter → 任意写；npx 并集 → 洗白前缀）。**名单越多，洞越多；换成「剥掉包装再判一次」这种结构性的写法，才是一次修完一类。**
+

@@ -146,6 +146,43 @@ test('doneCard：check 类证据要与真实执行记录对账（M4）', () => {
   assert.equal(noOption.ok, true, '调用方没提供凭据时不做对账（由 tools.js 保证总会提供）');
 });
 
+// REVIEW-tools §14 R7：M4 只对账了 check 分支，files 分支零文件系统访问——
+// 于是 `summary:'创建了完全不存在-abc123.py'` 照样能过，
+// 「1 张 done + 全降级」就成了一条零产出到 done 的短路。
+test('doneCard：files 类证据要点名项目里真实存在的文件（§14 R7）', () => {
+  const files = ['index.html', 'src/app.js'];
+
+  // 声称的文件不存在 → 拒
+  const phantom = doneCard(doing(), 'c1', { kind: 'files', summary: '创建了完全不存在-abc123.py' }, { projectFiles: files });
+  assert.equal(phantom.ok, false, '不存在的文件不能当证据');
+  assert.match(phantom.reason, /找不到/);
+
+  // 证据里没点任何文件名 → 拒
+  const noName = doneCard(doing(), 'c1', { kind: 'files', summary: '功能都跑起来了' }, { projectFiles: files });
+  assert.equal(noName.ok, false);
+  assert.match(noName.reason, /找不到/);
+
+  // 点到了真实文件 → 通过（完整路径、纯文件名、子目录三种写法都认）
+  for (const summary of ['index.html 能录入并保存', '改了 src/app.js', 'app.js 里加了保存逻辑']) {
+    const ok = doneCard(doing(), 'c1', { kind: 'files', summary }, { projectFiles: files });
+    assert.equal(ok.ok, true, `${summary} 应通过：${ok.reason}`);
+  }
+
+  // do.files 里写过的文件也算「点名」（模型常把文件名放 do、summary 只写结论）
+  const state = doing();
+  state.cards[0].do = { files: ['index.html'], at: '2026-01-01T00:00:00.000Z' };
+  const viaDo = doneCard(state, 'c1', { kind: 'files', summary: '页面能用了' }, { projectFiles: files });
+  assert.equal(viaDo.ok, true, `do.files 点了名也应通过：${viaDo.reason}`);
+
+  // check 类证据不受这条约束（它有自己的对账）
+  const checkOk = doneCard(doing(), 'c1', { kind: 'check', summary: 'node --test 全绿' }, { lastCheck: { name: 'c1', ok: true, exitCode: 0 }, projectFiles: [] });
+  assert.equal(checkOk.ok, true, checkOk.reason);
+
+  // 调用方不传 projectFiles 时不强制（纯函数约定）
+  const noFiles = doneCard(doing(), 'c1', { kind: 'files', summary: '创建了不存在-abc123.py' });
+  assert.equal(noFiles.ok, true, '没传 projectFiles 时不做文件对账');
+});
+
 test('downgradeCard：必须带理由；写 downgrades 留痕；已收尾不能再降', () => {
   const s = doing();
   assert.equal(downgradeCard(s, 'c1', '').ok, false);
@@ -162,19 +199,50 @@ test('downgradeCard：必须带理由；写 downgrades 留痕；已收尾不能�
   assert.equal(downgradeCard(r.state, 'c1', '再来一次').ok, false);
 });
 
-// REVIEW-tools §12 R3：理由也要能核对。`'x'` / `'我懂了'` 写进 downgrades 等于没写，
-// 而注释 philosophy 上它和 evidence 是同一个病——所以复用同一套「可观察性」判断。
+// REVIEW-tools §12 R3 / §14 R7：理由也要能核对。`'x'` / `'我懂了'` 写进 downgrades 等于没写，
+// 而 `'时间不够'` 这种「听着像理由但没有具体对象」的也要拦——它说不出降级后交付了什么。
+// §14 实测旧版判别力≈「≥4 字」：36 条空话放过 28 条。这条测试把那 36 条钉住。
 test('downgradeCard：空话理由被拒，写清交付到哪一步才收', () => {
   const s = doing();
-  for (const why of ['x', '我懂了', '完成了', '没问题']) {
+  // 显式空话
+  for (const why of ['x', '我懂了', '完成了', '没问题', 'ok', '好了', '基本完成', '差不多了']) {
     const r = downgradeCard(s, 'c1', why);
     assert.equal(r.ok, false, `空话理由应被拒：${why}`);
     assert.match(r.reason, /不算理由|实际交付/);
   }
-  // 说清「降到哪」的照常通过
-  const ok = downgradeCard(s, 'c1', '只跑通 demo，保存功能没做');
-  assert.equal(ok.ok, true, ok.reason);
-  assert.equal(ok.state.downgrades[0].reason, '只跑通 demo，保存功能没做');
+  // §14 列出的 36 条「听着像理由但没对象」——旧版放过 28 条，新版必须全拒
+  const pseudo = [
+    '时间不够', '没时间了', '不想做了', '做不下去了', '太难了', '太复杂了',
+    '搞不定', '做不出来', '卡住了', '有困难', '能力不行', '水平不够',
+    '先放着', '以后再说', '下次补', '暂时跳过', '先略过', '不做了',
+    '差不多就行', '够用了', '可以先这样', '勉强能用', '凑合着', '这样也行',
+    '没有空', '忙不过来', '精力有限', '状态不好', '心情不好', '想休息',
+    '反正也不重要', '无所谓', '随便吧', '算了吧', '就这样', '别的更要紧',
+    // 逗号不能当「分成了两段」的凭据（试过，8/8 漏放）
+    '随便吧，不做了', '算了，跳过', '太难了，放弃', '以后再说，下次补',
+  ];
+  for (const why of pseudo) {
+    const r = downgradeCard(s, 'c1', why);
+    assert.equal(r.ok, false, `没对象的理由应被拒：${why}`);
+  }
+  // 说清「降到哪」的照常通过（误杀检查：12 条真实理由只能放过 11 条，
+  // 唯一例外是光秃秃的「时间不够」——它确实没交代交付了什么，是故意拒的）
+  for (const why of [
+    '时间不够，改成只跑通 demo',
+    '没时间，只做出静态页面',
+    '卡在环境配置上，先做出静态页面',
+    'API 拿不到 key，改成用本地假数据',
+    '范围太大，这版只做录入不做搜索',
+    '不会写测试，跳过自动化检查',
+    '先把界面搭出来，逻辑下次再说',
+    '实现了一半，列表能显示但不能编辑',
+    '只跑通 demo，保存功能没做',
+    '第 2 步做完了，第 3 步没开始',
+    '导出功能砍掉，只保留录入',
+  ]) {
+    const r = downgradeCard(s, 'c1', why);
+    assert.equal(r.ok, true, `真实理由不该误杀：${why} → ${r.reason}`);
+  }
   // 拒绝时原 state 不变
   assert.equal(s.cards[0].status, 'doing');
   assert.equal(s.downgrades, undefined);

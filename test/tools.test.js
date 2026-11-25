@@ -293,6 +293,18 @@ test('plando_card 收尾必须有证据；无证据的 done 被拒且不落盘',
   const badEvidence = await call('plando_card', { action: 'done', dir, id: 'c1', evidence: { kind: 'vibes', summary: '我懂了' } });
   assert.match(badEvidence, /证据|plando：/);
 
+  // REVIEW-tools §14 R7：files 类证据要点名**真实存在**的文件。
+  // 这里 index.html 还没创建，所以即便 summary 看着很具体也要拒。
+  const phantom = await call('plando_card', { action: 'done', dir, id: 'c1', evidence: { kind: 'files', summary: 'index.html 能录入并保存' } });
+  assert.match(phantom, /找不到|plando：/, `不存在的文件不能当证据：${phantom}`);
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(dir, '.plando', 'state.json'), 'utf8')).cards[0].status,
+    'doing',
+    '被拒的 files 证据不应改状态',
+  );
+
+  // 真的建出来之后，同一句证据就成立了
+  fs.writeFileSync(path.join(dir, 'index.html'), '<form></form>\n', 'utf8');
   const ok = await call('plando_card', { action: 'done', dir, id: 'c1', evidence: { kind: 'files', summary: 'index.html 能录入并保存' } });
   assert.match(ok, /已 done/);
   const after = JSON.parse(fs.readFileSync(path.join(dir, '.plando', 'state.json'), 'utf8'));

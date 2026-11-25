@@ -179,6 +179,89 @@ test('npx 与裸命令名同口径：ALLOWED_COMMANDS 里有的，加 npx 也该
   }
 });
 
+// REVIEW-tools §14 R5 / R8：`npx` 曾经是**通用洗白前缀**。
+// §13 那版只判「npx 后面第一个 token 在不在名单里」，后面的 argv 完全不看——
+// 于是 `node -e "…"` 被拒、`npx node -e "…"` 放行，360 组（36 工具 × 10 危险参数）全放行，
+// 其中 260 组是那一轮从「拒」翻成「放」的。正修法是结构性的：剥掉 npx 包装，剩下的当独立命令重判。
+test('npx 不是洗白前缀：剥掉 npx 后等于那条命令本身（§14 R5）', () => {
+  // 危险形态：加了 npx 也必须一样被拒
+  for (const cmd of [
+    'npx node -e "require(\'fs\').writeFileSync(\'x\',\'y\')"',
+    'npx node --eval=1+1',
+    'npx node -e1+1',
+    'npx npm install left-pad',
+    'npx npm exec evil',
+    'npx python -c "print(1)"',
+    'npx tsx -e "1"',
+    'npx node -r ./x.cjs --test',
+    'npx node --import=./x.mjs --test',
+  ]) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `加了 npx 也不能放行：${cmd}`);
+    // 理由要指向真正危险的那一段，而不是只说「未知包」
+    assert.match(bad, /任意代码|安装|执行/, `理由要说到点子上：${cmd} → ${bad}`);
+  }
+  // 正常形态：剥壳后仍然放行（否则就是误杀）
+  for (const cmd of ['npx node --test', 'npx vite build', 'npx tsc --noEmit', 'npx vitest run', 'npx -y vite build']) {
+    assert.equal(validateCommand(cmd), null, `不该误杀：${cmd}`);
+  }
+  // 套娃有上限，不会靠无限 npx 递归绕开
+  assert.ok(validateCommand('npx npx npx npx node -e "1"'), '套娃也要拒');
+  // 只有 npx 没有命令
+  assert.ok(validateCommand('npx'), 'npx 空参要拒');
+  assert.ok(validateCommand('npx -y'), 'npx 只有开关要拒');
+});
+
+test('npx 的包别名不算版本号（§14 R8）', () => {
+  // `--package` 后面接包名 → 剥掉，按真正的命令判
+  assert.ok(validateCommand('npx --package evil evil'), '--package 指定的包不在白名单里要拒');
+
+  // `pkg@npm:other` 是别名：npx 会去下载 other，不是 pkg
+  for (const cmd of ['npx vitest@npm:cowsay', 'npx jest@npm:evil', 'npx tsc@latest:npm:x']) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `包别名必须拒：${cmd}`);
+    assert.match(bad, /别名/, `理由要说明这是别名：${cmd} → ${bad}`);
+  }
+  // 真版本号照常
+  for (const cmd of ['npx vitest@9 run', 'npx vitest@^1.2.3 run', 'npx tsc@5.0.0 --noEmit']) {
+    assert.equal(validateCommand(cmd), null, `版本号不该误杀：${cmd}`);
+  }
+});
+
+// REVIEW-tools §14 R6：路径类参数。review 实测有 20 类「换目录 / 指定输出路径」的参数能越界，
+// 逐个列开关永远补不全——所以按**值的形状**判，和 --env-file 同一条规则。
+test('路径类参数不许指向项目外（§14 R6）', () => {
+  for (const cmd of [
+    'npm test --prefix=C:\\Users\\me\\outside',
+    'npm test --prefix=/tmp/outside',
+    'npm test --prefix=../outside',
+    'npm --cache=C:\\temp\\npm-cache test',
+    'npm --cache=../cache test',
+    'python -X pycache_prefix=C:\\temp\\pyc -m pytest',
+    'python -X pycache_prefix=../pyc -m pytest',
+    'node --test ../evil.test.js',
+    'node --test C:\\evil.test.js',
+    'node --test sub/../../evil.js',
+    'vite build --outDir ../outside',
+    'tsc -p C:\\outside\\tsconfig.json',
+    'pytest --rootdir=../x -q',
+  ]) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `必须拒绝：${cmd}`);
+    assert.match(bad, /项目外|项目内/, `理由要说明是路径越界：${cmd} → ${bad}`);
+  }
+  // 常见合法写法一条都不能误杀（这是这条规则最容易翻车的地方）
+  for (const cmd of [
+    'tsc -p tsconfig.json', 'vite build --outDir dist', 'vite build --outDir ./dist',
+    'go test ./...', 'eslint src', 'prettier --check .',
+    'node --test test/a.test.js', 'node scripts/check-docs.mjs',
+    'node --test --test-reporter=spec', 'cargo test', 'pytest -q',
+    'node --env-file=.env --test',
+  ]) {
+    assert.equal(validateCommand(cmd), null, `不该误杀：${cmd} → ${validateCommand(cmd)}`);
+  }
+});
+
 test('validateCommand：拒绝「子命令本身就是执行代码」的形态（§8.7 ④）', () => {
   for (const cmd of [
     'pip install x', 'pip download x',

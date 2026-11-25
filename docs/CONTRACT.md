@@ -228,17 +228,23 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 **写盘规则**：先写 `state.json.tmp`，再 `fs.renameSync` 覆盖——多会话共享同一份 state，
 半写文件比报错更糟。
 
-**证据要对账（`kind='check'`）**：`evidence.summary` 是**自述**，「跑了 npm test，退出码 0」这句话
-在从没跑过的时候一样写得出来。所以插件把每次 `plando_check` 的结果记在
-`<projectDir>/.plando/last-check.json`（`{ name, command, ok, exitCode, at }`，**不进** `state.json`：
-它属于运行记录，不是状态机数据，不参与版本迁移），`plando_card action=done` 时对账：
-`kind='check'` 必须存在 `lastCheck.name === card.id && lastCheck.ok === true` 的记录，否则拒；
-`kind='files'` 不要求（改文件本来没有退出码）。纯函数 `doneCard(state, id, evidence, options)`
-只在 `options` 里**有这个键**时才强制，`tools.js` 每次都会传，所以插件运行时对账一定生效。
+**证据要对账**：`evidence.summary` 是**自述**，「跑了 npm test，退出码 0」这句话
+在从没跑过的时候一样写得出来。所以 `plando_card action=done` 时对两类证据分别核对：
 
-**降级理由也要能核对**：`downgrade` 复用 `checkEvidenceObservable`（和 evidence 同一套判断），
-`'x'` / `'我懂了'` / `'完成了'` 这类空话一律拒——「降级」是留给「范围砍小但仍交付了一部分」的出口，
-不是「跳过这一张」的快捷方式。全卡都降级时 `cards_done` 会拒（见 §2 事件表）。
+- `kind='check'`：每次 `plando_check` 的结果记在 `<projectDir>/.plando/last-check.json`
+  （`{ name, command, ok, exitCode, at }`，**不进** `state.json`：它属于运行记录，不是状态机数据，
+  不参与版本迁移），必须存在 `lastCheck.name === card.id && lastCheck.ok === true` 的记录，否则拒。
+- `kind='files'`：证据（或卡片的 `do.files`）里点名的文件必须**真的在项目里**
+  （工具层扫用户代码区后注入清单）。点不出真实文件名就拒——否则
+  「1 张 done + 全降级」能零产出走到 `done`（REVIEW-tools §14 R7）。
+
+纯函数 `doneCard(state, id, evidence, options)` 只在 `options` 里**有那个键**时才强制
+（`lastCheck` / `projectFiles`），`tools.js` 每次都会传，所以插件运行时对账一定生效。
+
+**降级理由也要能核对**：`downgrade` 的理由必须交代「降级后实际交付到哪一步」。
+判据是「删掉空话词后还剩 ≥6 个实质字符，或出现可指认的标记（文件名 / 数字 / 拉丁词）」——
+`'x'` / `'我懂了'` / `'时间不够'` 这类没有具体对象的一律拒（`'时间不够，只跑通 demo'` 可以）。
+全卡都降级时 `cards_done` 会拒（见 §2 事件表）。
 
 **id 字符集（硬约束）**：`cards[].id` 与 `tech.items[].id` 必须匹配 `^[A-Za-z0-9_-]{1,40}$`。
 原因不是洁癖：卡 id 会被当成文件名渲染成 `.plando/cards/<id>.md`，而 `../../README` 这种 id
