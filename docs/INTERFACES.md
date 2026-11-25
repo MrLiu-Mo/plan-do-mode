@@ -103,3 +103,16 @@ export function apply(ctx, config) { /* 同步 */ }
 
 `getStateContext()` 每次调用都**重新读盘**（阶段唯一真相源是 `.plando/state.json`），
 读不到返回 `null`；不要缓存到模块级变量。
+
+### 5.1 「当前项目」的解析（实现中发现的必要性）
+
+守卫拿到的 `exec` **只有 `name`**（API-FACTS §3），它不知道模型这次要操作哪个项目。
+如果守卫只会读 `config.defaultProjectDir`，用户显式传 `dir` 打开别的项目时，
+守卫会读到**错的项目**（更糟：读不到 → fail-closed 把只读操作也拦了）。
+
+所以：`deps.runtime.activeProjectDir` 存**最近一次 `plando_*` 调用解析出的项目路径**。
+
+- **可以缓存路径，不可以缓存状态**。守卫每次调 `getStateContext()` 都重新 `loadState(activeProjectDir)`。
+- 优先级：`runtime.activeProjectDir` → `config.defaultProjectDir` → `null`（→ 由 policy 决定 fail-closed）。
+- `classifyTool(undefined)` 归 `unknown` 并放行（INTERFACES §2 语义表）；
+  否 —— `subagent` / `dynamic-code` 与 `guardExtraDeny` 点名的仍然拒绝。

@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 开发中（脚手架阶段）。** 本仓库当前只有包元数据、图标、双语描述与文档；`lib/`、`cordis.patch.yml` 尚未实现，因此**现在装上去还不能用**。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
+**v0.1.0 开发中。** `cordis.patch.yml`（预设 + 人格提示词）与 `lib/` 下的状态机、产物、项目、卡片、检查、脚手架、配置模块已就位；工具层（`lib/tools.js` / `lib/index.js`）与文档还在收尾，**装上去暂时还不能完整跑通全流程**。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
 
 ## 安装
 
@@ -42,6 +42,40 @@ plugin_manager action=install_bundle target=<本仓库绝对路径>
 4. 产物（`IDEA.md`、`TECH.md`、`HANDOFF.md`、`CHANGE-GUIDE.md`、任务卡）全部由插件从 `.plando/state.json` 渲染，不是 AI 手写的——所以「状态不会说谎」。
 
 卸载（`plugin_manager action=remove_bundle`）后预设与工具消失，但 `~/.plando/` 与项目里的 `.plando/` **保留**：卸载不删用户数据。
+
+## 这个模式怎么工作
+
+预设「边学边做」= 8 个 `plando_*` 工具 + 只读文件工具（`read` / `glob` / `grep`）+ 一段人格提示词。模型**看不到** `write` / `edit` / `bash` / `pwsh` / `subagent`。
+
+**11 个阶段**（`plando_status` 会说清现在在哪、下一步做什么）：
+
+| 阶段 | 该做什么 |
+|---|---|
+| `inbox` | 灵感已记，还没立项（项目不会停在这里） |
+| `clarify` | 澄清：做成了是什么样、不做什么、谁用、有哪些假设 |
+| `idea` | 想法定稿，渲染 `IDEA.md` |
+| `tech` | 技术拆解，渲染 `TECH.md`；超出预算就拒绝 |
+| `decide` | 选路：小验证 / 直接做 / 交给 AI 做、人只验收 |
+| `verify` | 时间盒小验证，只验一个假设，必须带证据 |
+| `build` | 边做边学，逐卡「学 → 做 → 验」 |
+| `ship` | 收尾验收：离线能跑，能讲清自己改了什么 |
+| `done` / `handoff` / `dropped` | 三个终态：成了 / 交给 AI / 放弃或搁置 |
+
+**8 个工具**：`plando_status` 看阶段与下一步；`plando_project` open/list/init 项目；`plando_idea` 灵感库 add/list/pick/park/drop；`plando_clarify` 记录澄清答案（≤2 轮）；`plando_transition` 唯一推进入口；`plando_card` 卡片 start/done/downgrade/evidence；`plando_check` 只跑 `.plando/checks.json` 里已声明的命令；`plando_scaffold` 只写白名单配置文件。
+
+**两道守卫拦「代写」**：
+
+1. **结构性**：上面那个预设本身不挂任何写工具，`dsh-tool-fs` 显式 `write: false, edit: false`——模型连工具都没有。
+2. **运行时**：`ctx.tools.guard()` 在非 `build` 阶段拒绝一切能改变世界的工具，拒绝理由里写明当前阶段和下一步；状态读不出来时写类工具 fail-closed，只读工具放行，`plando_*` 自带阶段校验不拦。名单按能力列在 `lib/policy.js`（文件写 / 命令执行 / 动态代码 / 委派），可用 `guardExtraDeny` 追加。
+
+**插件配置**（写进 `cordis.patch.yml` 的 `plan-do-mode.config`）：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `dataRoot` | `~/.plando` | 灵感库与项目索引的根目录，留空用默认值 |
+| `autoCommit` | `false` | 打开后只提交模式产物（绝不 `git add -A`） |
+| `budget` | `{ mustUnderstand: 5, totalMinutes: 600 }` | `归属=user` 的条目数与总时长上限 |
+| `guardExtraDeny` | `[]` | 额外要拦的工具名（前缀匹配带后缀的变体） |
 
 ## 能力说明（请先读这一节再评估安全性）
 
