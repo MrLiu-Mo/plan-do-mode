@@ -577,7 +577,11 @@ node $env:TEMP\repro-review-state.mjs
 ## 8. 修复验收（审查者本人复核，不复用 Lead 的结论）
 
 我把上面每一条都按「坏输入」重跑了一遍。**13 条确认闭合**（F1/F2/F3/F4/F6/F7/F8/F9/F10/F11/F12/F13 + F5 的 payload 面），
-`node --test` 316 条全绿、`node scripts/check-docs.mjs` 通过。下面是**没修干净或引入新问题**的部分，每条都附实测。
+`node --test` 327 条全绿、`node scripts/check-docs.mjs` 通过。下面是**没修干净或引入新问题**的部分，每条都附实测。
+
+> 行号说明：§1–§7 的行号指向**基线** `65ad526:lib/state.js`（631 行）。本节行号指向复核当时的**工作树**——
+> 那时 `lib/` 正在被别人改动，所以本节尽量优先用「文件 + 函数名 + 可搜索的代码片段」定位，
+> 你按片段 grep 比按行号跳更靠谱。若对不上，`grep -n "产物路径「" lib/tools.js` 这类搜法一定准。
 
 ### R1（高，未闭合）F5 只堵了 payload 入口，磁盘上的坏 id 依然能覆盖项目文件
 
@@ -600,7 +604,7 @@ README.md 后 = "# 覆盖README"
 用户的 README 被永久覆盖 = true
 ```
 
-关键一点：`writeText` 的边界断言（`tools.js:154`）**挡不住这一击**，因为
+关键一点：`writeText` 的边界断言（搜 `产物路径「`）**挡不住这一击**，因为
 `path.join('.plando','cards','../../README.md')` = `README.md`——它**在项目目录内**，断言合法通过。
 F5c（写穿项目目录）确实闭合了，但「项目内任意文件」这一半还开着。
 
@@ -681,8 +685,7 @@ state.verify = { hypothesis: '', result: null, … }（已清空，对的）
 磁盘 VERIFY.md 还在 = true，里面的假设 = 用户愿意每天记账这件事（旧的）
 ```
 
-原因：`tools.js:468` 照 `effects.rerender` 打日志，而实际写不写由 `tools.js:319` 的
-`hasVerify = isNonEmptyString(state.verify.hypothesis)` 决定——hypothesis 已被清空，所以**跳过**。
+原因：`tools.js` 的 `lines.push(\`重渲染：…\`)` 照 `effects.rerender` 打日志，而实际写不写由那个 `const hasVerify = isPlainObject(state.verify) && isNonEmptyString(state.verify.hypothesis)` 决定——hypothesis 已被清空，所以**跳过**。
 模型收到的信号是「VERIFY.md 重渲染了」，于是以为旧假设已经不在磁盘上。
 
 修法：`renderArtifacts` 在 `verify.hypothesis` 为空且文件已存在时删除或清空 `VERIFY.md`；
