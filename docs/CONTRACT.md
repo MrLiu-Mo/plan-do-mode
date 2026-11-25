@@ -22,8 +22,15 @@ export const STAGES = [
 ];
 ```
 
+非终态集合：`inbox` / `clarify` / `idea` / `tech` / `decide` / `verify` / `build` / `ship`。
 终态集合：`done` / `handoff` / `dropped`。
 `paused` **不是阶段**，是任意非终态上的一个布尔标志。
+
+> **`inbox` 是枚举里的「灵感态」，项目不会停留在这里**（实现决定，2026-11-25）：立项
+> （`plando_idea action=pick`）直接从灵感库创建项目并把 stage 置为 `clarify`，
+> `createInitialState()` 产出的初始 stage 就是 `clarify`。因此 `drop` 的 `from` 虽按「任意非终态」
+> 字面包含 `inbox`，实际不会有项目以 `inbox` 身份进入状态机——这是**冗余而非矛盾**，实现按表格字面即可，
+> 不要为它加特判。
 
 每个阶段必须有一句中文标签（`STAGE_LABELS`）和一句「下一步该做什么」（`NEXT_ACTIONS[stage]`），
 这两样会出现在 `plando_status` 和守卫的拒绝理由里。
@@ -71,7 +78,7 @@ export function createInitialState(project);                 // -> state
 | `verify_result` | verify | decide | `result, evidence` | `result ∈ {pass, fail, inconclusive}`；`evidence` 非空 |
 | `cards_done` | build | ship | — | 所有卡 `status ∈ {done, downgraded}`，无 `todo/doing/stale` |
 | `ship_pass` | ship | done | `offlineOk, selfChange, explain` | 三项都为真/非空 |
-| `drop` | 任意非终态 | dropped | `reason` | `reason ∈ {falsified, parked}`；已立项才有意义 |
+| `drop` | 任意非终态 | dropped | `reason` | `reason ∈ {falsified, parked}`；实际不会有 `inbox` 项目，见 §1 备注 |
 | `revise` | idea / tech / decide / build | tech | `reason` | 非空；受影响卡标 `stale`；重渲染 IDEA.md |
 | `pause` | 任意非终态 | 同阶段 | — | 置 `paused=true` |
 | `resume` | 任意非终态 | 同阶段 | — | 置 `paused=false`；未暂停时调它不算错，返回 `{ok:true, noop:true}` |
@@ -180,6 +187,7 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
   createdAt: ISO, updatedAt: ISO,
   stage: STAGES[number],
   paused: false,
+  budget: { mustUnderstand: 5, totalMinutes: 600 },  // 快照：由 createInitialState 从 config.budget 写入
   idea: { id, title, oneLine, users, mvp: string[], acceptance: string[], notDo: string[], assumptions: string[], constraints: object },
   baseline: { experience, hoursPerWeek, goal },
   clarify: { rounds: number, answers: object[], open: string[] },
@@ -191,6 +199,10 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
   terminal: { kind: 'done'|'handoff'|'dropped', reason: string, at: ISO } | null,
 }
 ```
+
+**`budget` 是 state 快照**（契约补充）：`config.budget` 只在创建项目时读一次，写进 `state.budget`；
+之后所有渲染与校验都读 `state.budget`，这样产物不会因为用户改配置而前后不一致。
+`terminal.reason` 在 `ship_pass` / `choose_handoff` 这类没有 reason payload 的事件里写 `''`。
 
 ```js
 // Card
@@ -206,8 +218,9 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 **写盘规则**：先写 `state.json.tmp`，再 `fs.renameSync` 覆盖——多会话共享同一份 state，
 半写文件比报错更糟。
 
-**版本**：读到 `schemaVersion < 1` 之外的值或解析失败 → 报错停止，**绝不重置**；
-读到已知旧版本 → `migrate()` 升版后写回。
+**版本**：解析失败、`schemaVersion` 缺失、非整数、或高于当前 `SCHEMA_VERSION` → 报错停止，**绝不重置**。
+已知旧版本目前只有 `0`（视为「早期内部草稿」）：`migrate()` 补齐缺失字段、不覆盖已有值后升到 1。
+将来出现 v2 时改 `SCHEMA_VERSION` 并加升级分支。
 
 ## 5. 错误消息规范
 
@@ -220,6 +233,9 @@ plando：<现在在哪>，<为什么不行>——<下一步做什么>
 - 中文、一句话、不用 emoji、不超过 160 字。
 - 必须包含**下一步的具体动作**（调哪个工具、传哪个 event）。
 - 非法转移同时写一条 `log.jsonl`：`{at, kind:'reject', event, from, reason}`。
+- **分层约定（契约补充）**：`validatePayload(event, payload, config)` 拿不到 state，
+  所以它的 reason 里**不含**「现在是哪个阶段」；只在 `applyEvent` 里由调用方用阶段名包装一次。
+  测试断言 `validatePayload` 的 reason 时，只断言 `plando：` 前缀与「下一步：」两部分。
 
 ## 6. 产物渲染契约
 
@@ -244,6 +260,14 @@ plando：<现在在哪>，<为什么不行>——<下一步做什么>
 ```
 | id | 技术项 | 为什么需要 | 不会怎样错 | 归属 | 难度 | 分钟 | 过关判据 | 文件 |
 ```
+
+**TECH.md 的既定形态**（契约补充）：一级标题为 `# <name> 技术拆解`；按 owner 分三组
+（`user` → `follow` → `ai`），**每组各带一份逐字 9 列表头**——Markdown 分组表格必须各有表头。
+`checkTechStructure` 只要求表头**至少出现一次**，不重复计数。
+
+**`renderTech` 的预算来源**（契约补充）：`renderTech(state, options?)` 的读取顺序固定为
+`options.budget` → `state.budget` → 契约默认 `{5, 600}`。其中 `options.budget` **只作测试或显式覆盖**，
+生产路径读 `state.budget`。
 
 `HANDOFF.md`、`CHANGE-GUIDE.md`、卡片正文 `<项目>/.plando/cards/<id>.md` 的结构由 `artifacts.js` 自己定，
 但必须满足：卡片正文含「学 / 做 / 验」三段小标题，且每段都有可执行判据。
