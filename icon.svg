@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="边学边做">
+  <title>边学边做</title>
+  <desc>三段上升的台阶代表「学 → 做 → 验」，上方的对勾代表每一张卡都要有可观察的验收结果。</desc>
+  <defs>
+    <linearGradient id="plando-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e2a3a"/>
+      <stop offset="1" stop-color="#14534b"/>
+    </linearGradient>
+    <linearGradient id="plando-bar" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#6fd6b8"/>
+      <stop offset="1" stop-color="#c4f2df"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="60" fill="url(#plando-bg)"/>
+  <rect x="44" y="152" width="40" height="56" rx="12" fill="#5b8f86"/>
+  <rect x="108" y="120" width="40" height="88" rx="12" fill="#4fae97"/>
+  <rect x="172" y="88" width="40" height="120" rx="12" fill="url(#plando-bar)"/>
+  <path d="M52 84 L78 110 L120 56" fill="none" stroke="#f2fbf7" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

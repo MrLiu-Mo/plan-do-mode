@@ -2,6 +2,12 @@
 node_modules/
 vendor/
 
+# 打包产物（npm pack / GitHub Release 的 tgz）
+*.tgz
+
+# plan-do 模式的运行时状态：项目内的 .plando/ 不随仓库提交
+.plando/
+
 # 构建产物
 dist/
 build/
