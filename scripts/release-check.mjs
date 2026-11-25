@@ -22,8 +22,16 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** 占位符：出现在发布文档/元数据里就是没改完。 */
-const PLACEHOLDER = /<owner>|<your[-_ ]?name>|example\.com/i;
+/**
+ * 占位符：**必须出现在网址里**才算没改完。
+ *
+ * 早先这里只匹配 `<owner>` / `example.com` 这几个字面量，于是任何一句
+ * 「文档里还有 `<owner>` 吗」的**说明性文字**都会被判成阻塞项——
+ * `docs/RELEASE.md` 100% 误报（第一版就是这么红的），`docs/INSTALL.md`
+ * 解释同一个检查时也一样。而检查真正在意的是「还有没有指向假仓库的**网址**」，
+ * 所以要求占位符紧挨着 URL 的上下文（`https://`、`github.com/`、`@`、`git+`）。
+ */
+const PLACEHOLDER = /(?:https?:\/\/|git\+|github\.com\/|@)[^\s)]*?(?:<owner>|<your[-_ ]?name>|example\.com)/i;
 
 /** 必须填真值的 package.json 字段（照 PLAN §10.2 的包元数据清单）。 */
 const REQUIRED_META = ['name', 'version', 'description', 'license', 'repository', 'homepage', 'bugs', 'icon'];

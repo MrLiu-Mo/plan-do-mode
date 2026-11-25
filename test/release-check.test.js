@@ -104,6 +104,29 @@ test('checkRelease：docs/RELEASE.md 不参与占位符扫描（它本身就要�
   assert.deepEqual(blockers, [], 'RELEASE.md 是换占位符的说明书，扫它必然误报');
 });
 
+// 第一版把占位符判据写成「出现 <owner> 这几个字」的纯字面量匹配，于是**说明性文字**也被判成阻塞项：
+// `docs/INSTALL.md` 里那句「文档里还有 <owner> 吗」让发布检查自己红了一条，
+// 而它想拦的其实是「还指向假仓库的网址」。判据改成要求占位符紧挨 URL 上下文。
+test('checkRelease：只是提到占位符字样的说明文字不算阻塞', () => {
+  const docs = {
+    ...goodDocs,
+    'docs/INSTALL.md': '它现在**是红的**——仓库地址还没定。等你把 `<owner>` 换成真实值再看。',
+  };
+  const { blockers } = checkRelease(goodMeta(), docs, cleanEnv);
+  assert.deepEqual(blockers, [], `解释「怎么换占位符」的正文不该算没改完：${blockers.join(' | ')}`);
+});
+
+test('checkRelease：真正指向假仓库的网址仍要报出来（正文解释不能把检查弄瞎）', () => {
+  for (const bad of [
+    'add -w "https://github.com/<owner>/plan-do-mode/releases/download/v0.1.0/x.tgz"',
+    'git+https://github.com/<your-name>/plan-do-mode.git',
+    '见 https://example.com/plan-do-mode',
+  ]) {
+    const { blockers } = checkRelease(goodMeta(), { ...goodDocs, 'README.md': bad }, cleanEnv);
+    assert.ok(blockers.some((b) => b.includes('README.md')), `真实占位网址必须报：${bad} → ${blockers.join(' | ')}`);
+  }
+});
+
 test('checkRelease：仓库对象缺 url 算阻塞', () => {
   const { blockers } = checkRelease(goodMeta({ repository: { type: 'git' } }), goodDocs, cleanEnv);
   assert.ok(blockers.some((b) => b.includes('repository')), blockers.join('\n'));

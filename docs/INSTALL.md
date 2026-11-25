@@ -134,7 +134,7 @@ plugin_manager action=remove_bundle target=dsh-plan-do
 ## 6. 开发者自查（改完代码之后）
 
 ```bash
-node --test                     # 395 条，必须全绿
+node --test                     # 397 条，必须全绿
 node scripts/check-docs.mjs     # 文档与代码的交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 分发包冒烟：真打包 → 解开 → 真加载 → 跑一遍流程
@@ -145,10 +145,10 @@ node scripts/smoke-pack.mjs     # 分发包冒烟：真打包 → 解开 → 真
 **发布前再加一条**（不进 CI，因为它会检查工作区干净）：
 
 ```bash
-node scripts/release-check.mjs  # 元数据填全了吗、文档里还有 <owner> 吗、工作区干净吗
+node scripts/release-check.mjs  # 元数据填全了吗、文档里还有仓库地址占位符吗、工作区干净吗
 ```
 
-它现在**是红的**——仓库地址还没定。等你把 `<owner>` 换成真实值、补上
+它现在**是红的**——仓库地址还没定。等你把 README / PLAN 里的仓库地址占位符换成真实值、补上
 `repository` / `homepage` / `bugs` / `icon`，它会变绿。发布流程见 [RELEASE.md](RELEASE.md)。
 
 装本地目录版本时，改完代码**要重新装一次**（`link:` 指向目录，但 profile 里的配置是装那一刻生成的）。
