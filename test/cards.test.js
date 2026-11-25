@@ -174,13 +174,39 @@ test('doneCard：files 类证据要点名项目里真实存在的文件（§14 R
   const viaDo = doneCard(state, 'c1', { kind: 'files', summary: '页面能用了' }, { projectFiles: files });
   assert.equal(viaDo.ok, true, `do.files 点了名也应通过：${viaDo.reason}`);
 
-  // check 类证据不受这条约束（它有自己的对账）
-  const checkOk = doneCard(doing(), 'c1', { kind: 'check', summary: 'node --test 全绿' }, { lastCheck: { name: 'c1', ok: true, exitCode: 0 }, projectFiles: [] });
+  // check 类证据也要先满足「项目里有用户产出」（§16 R12）；
+  // 这里给了真实业务文件，所以走的是「它有自己的对账」那条路。
+  const checkOk = doneCard(doing(), 'c1', { kind: 'check', summary: 'node --test 全绿' }, { lastCheck: { name: 'c1', ok: true, exitCode: 0 }, projectFiles: files });
   assert.equal(checkOk.ok, true, checkOk.reason);
 
   // 调用方不传 projectFiles 时不强制（纯函数约定）
   const noFiles = doneCard(doing(), 'c1', { kind: 'files', summary: '创建了不存在-abc123.py' });
   assert.equal(noFiles.ok, true, '没传 projectFiles 时不做文件对账');
+});
+
+// REVIEW-tools §16 R12：`node --test` 在一个测试文件都没有的项目里退出码是 0，
+// 而 M4 的判据就是「退出码是不是 0」。于是
+// `declare node --test → run(通过) → done` 三步就能把卡收掉，AI 一个字都没写。
+// 修法：`done` 前要求项目里**至少有一个用户自己的产出**（不是模式产物、不是脚手架能写的配置）。
+test('doneCard：项目里一个用户文件都没有时，任何证据都不成立（§16 R12）', () => {
+  const checkEvidence = { kind: 'check', summary: '测试跑通了，退出码 0' };
+  const lastCheck = { name: 'c1', ok: true, exitCode: 0 };
+
+  // 项目里只有模式产物 → 拒（这正是 R12 的攻击现场）。
+  // 纯函数自己也排一次产物：调用方漏排时不能靠「IDEA.md 是文件」蒙过去。
+  for (const onlyMeta of [[], ['IDEA.md', 'TECH.md'], ['IDEA.md', 'docs/TECH.md']]) {
+    const r = doneCard(doing(), 'c1', checkEvidence, { lastCheck, projectFiles: onlyMeta });
+    assert.equal(r.ok, false, `零产出不能收尾：${JSON.stringify(onlyMeta)}`);
+    assert.match(r.reason, /还没有你自己的文件/);
+  }
+
+  // 有一个真实业务文件 → 通过
+  const ok = doneCard(doing(), 'c1', checkEvidence, { lastCheck, projectFiles: ['test/login.test.js'] });
+  assert.equal(ok.ok, true, ok.reason);
+
+  // files 类证据同样受这条约束
+  const filesEvidence = doneCard(doing(), 'c1', { kind: 'files', summary: 'index.html 能录入' }, { projectFiles: [] });
+  assert.equal(filesEvidence.ok, false);
 });
 
 test('downgradeCard：必须带理由；写 downgrades 留痕；已收尾不能再降', () => {
@@ -246,6 +272,31 @@ test('downgradeCard：空话理由被拒，写清交付到哪一步才收', () =
   // 拒绝时原 state 不变
   assert.equal(s.cards[0].status, 'doing');
   assert.equal(s.downgrades, undefined);
+});
+
+// REVIEW-tools §16 R11：上一版把「句子里有数字」当成「可指认的标记」，于是
+// `'算了，明天再说 1'` / `'太难了，先做别的 2'` 这类「空话 + 随便缀个数字」十句十过。
+// 修法：数字不再单独算标记（「第 1 步」说的是进度，不是交付了什么），
+// 但数字仍然参与字数统计——`'第 2 步做完了，第 3 步没开始'` 这种真理由照旧通过。
+test('downgradeCard：空话后面缀个数字不算理由（§16 R11）', () => {
+  const s = doing();
+  for (const why of [
+    '算了，明天再说 1', '太难了，先做别的 2', '时间不够，做到第 1 步',
+    '不想做了，反正第 1 版够用', '太复杂，先放着 3', '随便吧，凑合能用 1',
+    '搞不定，先这样 2', '跳过，先把 1 做了', '懒得弄，下次 1', '没时间，看了 1 眼',
+  ]) {
+    const r = downgradeCard(s, 'c1', why);
+    assert.equal(r.ok, false, `空话缀数字应被拒：${why}`);
+  }
+  // 真理由里的数字依然是内容的一部分，不能被这条改动误杀
+  for (const why of [
+    '先把录入做通，2 个高级筛选砍掉',
+    '第 2 步做完了，第 3 步没开始',
+    '只做了 1 个页面，还有 2 个没做',
+  ]) {
+    const r = downgradeCard(s, 'c1', why);
+    assert.equal(r.ok, true, `真实理由不该误杀：${why} → ${r.reason}`);
+  }
 });
 
 test('setLearn / setDo：写 note 与 files，空值被拒', () => {
