@@ -14,7 +14,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const YML_PATH = path.join(ROOT, 'cordis.patch.yml');
 
 const raw = fs.readFileSync(YML_PATH, 'utf8');
-const lines = raw.split('\n');
+// 行尾统一按 LF 处理：仓库在 Windows 上可能被 core.autocrlf 检出成 CRLF，
+// 断言不该因为行尾而红（内容判定与行尾无关）。
+const lines = raw.replace(/\r\n/g, '\n').split('\n');
 
 // 去掉注释行与空行，剩下的是「有效 YAML」；顶层第一个有效行必须是 - insert:。
 const effective = lines.filter((line) => {

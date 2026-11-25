@@ -1,0 +1,38 @@
+# CI：node --test + 文档一致性 + 分发清单验证。
+#
+# 为什么 ubuntu 和 windows 都要跑：`import()` 绝对路径、路径分隔符、
+# 以及 npm.cmd 的可执行方式在 Windows 上都不一样（API-FACTS §5 的坑表）。
+# 只在 Linux 上绿，不代表用户装得上。
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: node 24 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 零依赖：没有 install 步骤，也不配 npm cache（仓库里没有 lock 文件）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 零依赖：没有 install 步骤也能跑（这本身就是一条断言）。
+      - name: 跑全量测试
+        run: node --test
+
+      - name: 检查文档引用一致
+        run: node scripts/check-docs.mjs
+
+      # A8：files 白名单漏文件时，本地一切正常、别人装完是坏的。
+      - name: 验证 npm pack 清单完整
+        run: node scripts/verify-pack.mjs
