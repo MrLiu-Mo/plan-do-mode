@@ -17,7 +17,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+// 行尾统一按 LF 处理：仓库在 Windows 上会被 core.autocrlf 检出成 CRLF，
+// 而下面几条正则是按 `\n\n` / `^` 写的，不归一化会在干净检出上误报。
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 
 const problems = [];
 const fail = (message) => problems.push(message);
