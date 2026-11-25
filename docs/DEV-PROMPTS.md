@@ -497,6 +497,12 @@ git status --short   # 应该是空的
 
 ## 十一、还缺的输入（开工前需要你定的）
 
+> **已定（2026-11-25，四项全部确认）**：① 包名 `dsh-plan-do`，仓库先用占位、建好后替换
+> `README.md` 里那一处 `<owner>`；② 预算照用 `{ mustUnderstand: 5, totalMinutes: 600 }`；
+> ③ persona 篇幅 2000–4000 字（R6 已按此实现并有断言）；④ `docs/` 进 npm 包，但排除
+> `docs/REVIEW-*.md`（内部红队报告留在仓库，`package.json` 的 `files` 用 `!docs/REVIEW-*.md`）。
+> 下面四条原文保留，作为「当初为什么问」的记录。
+
 1. **包名与仓库地址**：现在按 `dsh-plan-do` / `github.com/<owner>/plan-do-mode` 占位，
    R0 和 R7 都要用真实值。
 2. **`budget` 默认值**：CONTRACT 用的是 PLAN 的 `{ mustUnderstand: 5, totalMinutes: 600 }`，是否照用。
