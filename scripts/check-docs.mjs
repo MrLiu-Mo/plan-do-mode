@@ -97,13 +97,31 @@ for (const [name, text] of [['PLAN.md', plan], ['docs/START-HERE.md', startHere]
   }
 }
 
-// ── 5. DEV-PROMPTS 的轮次编号必须连续且从 R0 开始 ────────────────────
-const rounds = [...new Set(all(prompts, /^### (R[0-9]+) /gm))];
-const expectedRounds = Array.from({ length: rounds.length }, (_, i) => `R${i}`);
+// ── 5. DEV-PROMPTS 的轮次编号必须连续，且允许 R1a/R1b 这类拆分子轮 ──
+// 规则：基础轮次从 R0 连续递增；同一基础轮次下的子轮次按 a、b、c… 连续。
+const rounds = [...new Set(all(prompts, /^### (R[0-9]+[a-z]?) /gm))];
 if (rounds.length === 0) {
   fail('DEV-PROMPTS.md：找不到任何 `### R<n> ...` 轮次标题');
-} else if (rounds.join(',') !== expectedRounds.join(',')) {
-  fail(`DEV-PROMPTS.md：轮次编号不连续，实际 ${rounds.join(',')}，期望 ${expectedRounds.join(',')}`);
+} else {
+  const groups = [];
+  for (const round of rounds) {
+    const [, base, sub = ''] = round.match(/^R([0-9]+)([a-z]?)$/);
+    const last = groups[groups.length - 1];
+    if (last && last.base === base) last.subs.push(sub);
+    else groups.push({ base, subs: [sub] });
+  }
+
+  groups.forEach((group, index) => {
+    if (group.base !== String(index)) {
+      fail(`DEV-PROMPTS.md：基础轮次不连续，第 ${index + 1} 个是 R${group.base}，应为 R${index}`);
+    }
+    if (group.subs.length > 1) {
+      const expectedSubs = group.subs.map((_, i) => String.fromCharCode(97 + i));
+      if (group.subs.join(',') !== expectedSubs.join(',')) {
+        fail(`DEV-PROMPTS.md：R${group.base} 的子轮次应为 ${expectedSubs.join(',')}，实际 ${group.subs.join(',')}`);
+      }
+    }
+  });
 }
 
 // ── 输出 ─────────────────────────────────────────────────────────────

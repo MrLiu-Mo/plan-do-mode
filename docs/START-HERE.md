@@ -8,7 +8,7 @@
 | 文件 | 给谁看 | 什么时候看 |
 |---|---|---|
 | [PLAN.md](../PLAN.md) | 你 + 实现者 AI | 需求与验收标准（A1–A9）。**这是需求，不能改** |
-| [DEV-PROMPTS.md](DEV-PROMPTS.md) | 你 | 怎么把开发工作交给 AI：L1 前缀 + R0–R7 任务卡 + 验收卡 |
+| [DEV-PROMPTS.md](DEV-PROMPTS.md) | 你 | 怎么把开发工作交给 AI：L1 前缀 + R0–R7 任务卡（R1 拆成 R1a/b/c）+ 验收卡 + 撞输出上限的处置 |
 | [CONTRACT.md](CONTRACT.md) | 实现者 AI | state.js 的精确契约：阶段/事件/payload/错误消息 |
 | [API-FACTS.md](API-FACTS.md) | 实现者 AI | DSH 插件 API 的已验证事实，防止它凭空编 API |
 | [../scripts/check-docs.mjs](../scripts/check-docs.mjs) | 你 | `node scripts/check-docs.mjs` 检查四份文档互相引用一致 |

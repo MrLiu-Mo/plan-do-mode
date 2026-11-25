@@ -53,8 +53,12 @@
 - 中文注释、中文错误消息；错误消息格式见 docs/CONTRACT.md §5。
 - 每次改动后：先跑 node --test 全绿，再 git commit（一次 commit 只包含本轮产出的文件）。
   commit message 用 conventional commits（feat/test/docs/chore），中文正文，说明改了什么、验收怎么过的。
+- **单次写入 ≤180 行**：一个 write 或一次 edit 的内容不超过 180 行。要写更长的文件，
+  先 write 骨架（导出签名 + 一行 TODO），再用 edit 逐段填充。**不要一条消息里吐 500 行代码。**
 
 【工作方式】
+- **先落笔，再迭代**：如果发现自己在长篇推演实现细节（超过 30 行 reasoning），立刻停下，
+  先写出能跑的最小骨架，让 `node --test` 告诉你哪里错。这个仓库的验收靠测试，不靠「想清楚了」。
 - 只做本轮任务卡里列出的文件。需要动别的文件，先问我。
 - 做完后按顺序贴三样东西：① 改动的文件清单 ② node --test 的输出尾部（通过数/失败数）③ git log --oneline -1。
 - 不确定的地方停下来问，不要猜。猜错的代价比问一句高得多。
@@ -93,32 +97,85 @@ node -e "const zh=require('./locale/zh.json'),en=require('./locale/en.json'); if
 【禁止】不写 lib/ 下任何文件；不写 cordis.patch.yml（下一轮才写）。
 ```
 
-### R1 state.js（最重的一轮，不要合并）
+### R1a state.js 骨架（常量与转移表）
 
 ```text
-【本轮目标】实现纯函数状态机 lib/state.js + 完整测试 test/state.test.js。这是整个项目的地基。
+【本轮目标】只写 lib/state.js 的「数据部分」：阶段、标签、下一步、转移表、初始状态。
+不写校验逻辑、不写测试（下一轮写）。
 
-【产出】
-- lib/state.js，导出（名字逐字照 CONTRACT）：
-  STAGES, TERMINAL_STAGES, STAGE_LABELS, NEXT_ACTIONS, TRANSITIONS,
-  canTransition(state, event), validatePayload(event, payload, config),
-  applyEvent(state, event, payload, config) -> { ok, state?, reason?, effects? },
-  computeSize(items, constraints), checkBudget(items, budget), migrate(state), createInitialState(project)
-- test/state.test.js：node:test 用例，覆盖 CONTRACT §2 表格的**每一行**，
-  每行至少一个合法用例 + 一个非法用例（错误阶段调用）。
-
-【关键要求】
-- 纯函数：不读文件、不读时钟以外的外部状态（时间戳由调用方传入或用 new Date()，但不要在测试里断言具体值）。
-- 非法转移返回 { ok:false, reason }，reason 必须符合 CONTRACT §5 的错误消息形状。
-- 预算与规模判定严格按 CONTRACT §3，超预算的 reason 里必须出现「超了多少」和「怎么降级」。
-- revise 要把受影响卡标 stale（受影响 = 该卡的 techIds 里有本次变更涉及的项），并把 stage 退回 tech。
-- migrate：schemaVersion 缺失或小于当前版本时升级；解析不了/版本高于当前 → 返回错误，绝不返回空状态。
+【产出】lib/state.js，本轮只导出这 6 个常量：
+- SCHEMA_VERSION = 1
+- STAGES：11 项，顺序照 CONTRACT §1
+- TERMINAL_STAGES：['done','handoff','dropped']
+- STAGE_LABELS：每个阶段一句中文名（澄清 / 技术拆解 / 选路 / 小验证 / 边做边学 / 收尾验收 / 已完成 / 已交接 / 已放下 / 灵感 / 想法定稿）
+- NEXT_ACTIONS：每个阶段一句「下一步做什么」，中文，≤40 字
+- TRANSITIONS：{ [event]: { from: string[], to: string } }，照 CONTRACT §2 表格**逐行**抄，
+  14 个事件一个都不能少；`drop` 的 from 写 ['inbox','clarify','idea','tech','decide','verify','build','ship']；
+  `pause`/`resume` 的 from 同样列全非终态；`reopen` 的 from 写 ['done','handoff','dropped']。
+文件末尾留一行 `// TODO(R1b): canTransition / validatePayload / applyEvent / computeSize / checkBudget / migrate / createInitialState`
 
 【验收命令】
-node --test test/state.test.js
-node -e "import('./lib/state.js').then(m=>{const s=m.STAGES; if(s.length!==11) throw new Error('stage count'); console.log(Object.keys(m).join(','))})"
+node -e "import('./lib/state.js').then(m=>{if(m.STAGES.length!==11)throw new Error('stages');if(Object.keys(m.TRANSITIONS).length!==14)throw new Error('events');console.log('ok')})"
 
-【禁止】不碰文件系统；不在这一轮写 artifacts/tools（下一轮）。
+【禁止】不写测试、不写渲染、不碰文件系统；本文件不要超过 120 行。
+```
+
+### R1b state.js 校验与推进
+
+```text
+【本轮目标】在现有 lib/state.js 上补齐纯函数逻辑（用 edit 追加，不要重写整个文件）。
+
+【产出】lib/state.js 追加导出：
+- canTransition(state, event) -> boolean
+- validatePayload(event, payload, config) -> { ok, reason? }
+- applyEvent(state, event, payload, config) -> { ok, state?, reason?, effects? }
+- computeSize(items, constraints) -> { size, sizeReason, totalMinutes }
+- checkBudget(items, budget) -> { ok, reason? }
+- migrate(state) -> { ok, state?, reason? }
+- createInitialState(project) -> state
+
+【关键要求】
+- 纯函数；不改传入的 state（返回新对象）。
+- 非法转移返回 { ok:false, reason }，reason 照 CONTRACT §5 的形状。
+- 预算/规模照 CONTRACT §3；超预算的 reason 要同时出现「超了多少」和「怎么降级」。
+- revise：受影响卡标 stale（受影响 = techIds 与变更项有交集），stage 退回 tech。
+- migrate：缺失或更旧 → 升级；更高版本或不可解析 → 返回错误，**绝不返回空状态**。
+
+【验收命令】
+node --test   # 此时还没有测试文件，应为 0 tests、exit 0；真正的验收在 R1c
+node -e "import('./lib/state.js').then(m=>{for(const f of ['canTransition','validatePayload','applyEvent','computeSize','checkBudget','migrate','createInitialState']) if(typeof m[f]!=='function') throw new Error('missing '+f); console.log('ok')})"
+
+【禁止】本轮仍不写测试；单次写入 ≤180 行，超了就用多次 edit 分段追加。
+```
+
+### R1c state.test.js（分成三个文件）
+
+```text
+【本轮目标】给 state.js 补测试。**拆成三个测试文件**，一次只写一个。
+
+【产出】按顺序写，每写完一个跑一次 node --test：
+1. test/state.transitions.test.js
+   覆盖 CONTRACT §2 表格的每一行：每行一个合法用例 + 一个「错误阶段调用」的非法用例；
+   另测 pause/resume 的幂等、reopen 清 terminal、非法 event 名。
+2. test/state.payload.test.js
+   覆盖 §3：clarify_done 七个字段缺失各一次、assumptions 为空、
+   done 只写「功能都实现了」被拒、baseline 越界；
+   tech_ok 每项 9 字段缺失、owner 非法、difficulty 越界；
+   choose_verify 的 timeboxMin 边界（0 / 60 / 61）；verify_result 的 result 非法值。
+3. test/state.budget.test.js
+   覆盖 §3 预算与规模：user 条数超限、总分钟超限（reason 含两个数字）、
+   totalMinutes>180 判 large、promiseRisk 判 large、large 时 decide 推荐必须 verify。
+
+【关键要求】
+- 只断言必须为真的东西：错误消息用正则匹配关键片段（如 /阶段/、/预算/），不要断言整句文案。
+- 用例之间不共享可变状态；每个用例自己造 state（可以写一个 makeState(overrides) 帮助函数）。
+- 测试里不许出现 Date.now() 断言、不许写真实目录。
+
+【验收命令】
+node --test
+node --test test/state.transitions.test.js test/state.payload.test.js test/state.budget.test.js
+
+【禁止】不为了让测试变绿而改动 CONTRACT 的判据；发现契约本身自相矛盾，停下来问。
 ```
 
 ### R2 artifacts.js
@@ -366,15 +423,67 @@ git status --short   # 应该是空的
 | 10 | 给每个阶段都写一个专用推进工具 | 工具数量爆炸，模型选错 | CONTRACT §2 事件表 |
 | 11 | 在测试里写真实 `~/.plando` | 污染开发机 | L1 测试约定 |
 | 12 | 自作主张加 UI / client 端 | 超出 v1 范围，且需要构建链 | L1 硬约束 |
+| 13 | 一条消息里吐 500 行代码 | **撞输出 token 上限，回答被截断**（实测踩过） | L1「单次写入 ≤180 行」+ R1a/b/c 拆分 |
+| 14 | 长时间 reasoning 里推演实现细节 | 推理本身计入输出 token，同样触发截断（实测 R1 四次截断，推理占 10 万字符） | L1「先落笔再迭代：reasoning 超 30 行就停下」 |
 
 ---
 
-## 九、建议的会话节奏
+## 九、撞到输出 token 上限怎么办（实测排查记录）
+
+**症状**：对话里出现「已达到输出 token 上限 / 回答被截断，已有输出保留在对话中」，R1 反复卡住不产出文件。
+
+**实测数据**（本机 `~/.dsh/sessions` 会话日志，R1 那四次）：
+
+| turn | 输出 token | 内容 | stopReason |
+|---|---|---|---|
+| 3 | 43344 | 纯 reasoning，108701 字符 | `length` |
+| 4 | 32768 | reasoning 97685 字符 + 一句「现在开始 R1」 | `length` |
+| 5 | 32768 | 纯 reasoning | `length` |
+| 6 | 32768 | 纯 reasoning | `length` |
+
+关键结论：**推理（reasoning）算输出 token**。模型没有在写代码，而是在「想怎么写 state.js」上把预算烧光了。
+`write` 一个字都没发出去，所以文件不存在、`node --test` 无事可测。
+
+**三层原因**（从近到远）：
+
+1. **任务卡太大**：R1 原来要求「一个 800+ 行的 state.js + 覆盖 14 个事件的完整测试」一次交付。
+2. **模型的推理刹不住**：它反复自我推演「字段名该叫什么 / 错误消息怎么写」，越想越长，
+   直到撞上限。这不是模型坏，是任务粒度大到一个响应装不下。
+3. **provider 单请求输出上限**（`maxTokens`）：本机 `bananarouter/deepseek-v4.1-flash`
+   实测在 32768 处截断（`model.maxTokens` 或 adapter 的 `defaultMaxTokens` 决定）。
+   这一层即使调大也不能根治——1M 上下文里塞不下「一次写完整个地基」。
+
+**已经做的修正**（本仓库）：
+
+- R1 拆成 **R1a（常量与转移表）/ R1b（校验与推进）/ R1c（测试，且再拆三个文件）**。
+- L1 加两条硬约束：**单次写入 ≤180 行**、**reasoning 超 30 行就停下先落笔**。
+- 反模式清单补第 13、14 条。
+
+**如果还是撞上限，按顺序试**：
+
+1. **「继续」**：UI 提示里就写了——发送「继续」让模型接着输出。这只救「差一点」的情况。
+2. **让它分段写**：`先只写 R1a 的 TRANSITIONS，写完就停，不要写别的`。
+   一段一段来，比一次给一大段稳。
+3. **换更小的推理强度**（如果模型支持）：推理少 → 留给正文的输出预算多。
+   本机模型走 `bananarouter`，推理强度在模型选择器里调。
+4. **调大该模型的输出上限**：设置 → 模型 → 该提供方 → 模型行 →「最大输出 token 数」。
+   只是把天花板抬高，不解决「一次写太多」。
+5. **换会话**：一次会话里堆了太多推理历史（实测 input 从 774 涨到 46355），
+   模型会越推越长。写 `docs/HANDOFF-<轮次>.md` 然后开新会话。
+
+> 注意：**不要把输出上限调到接近上下文窗口**。推理 + 正文 + 工具参数都算输出，
+> 上限过大只会在更晚的地方以更贵的方式截断。
+
+---
+
+## 十、建议的会话节奏
 
 | 轮次 | 预计产出 | 之后做什么 |
 |---|---|---|
 | R0 | 6 个文件，无逻辑 | `git commit -m "chore: 脚手架"` |
-| R1 | state.js + 测试（最大一轮） | 全绿后 commit；跑一次 L3 验收卡 |
+| R1a | state.js 的常量与转移表（≤120 行） | commit |
+| R1b | 校验与推进函数（分段 edit） | commit |
+| R1c | 三个测试文件 | 全绿后 commit；跑一次 L3 验收卡 |
 | R2 | artifacts.js + 测试 | commit |
 | R3 | config/project/git + 测试 | commit；跑 L3 验收卡（这轮最容易越权写） |
 | R4 | cards/checks/scaffold + 测试 | commit；跑 L3 验收卡（白名单绕过） |
@@ -386,7 +495,7 @@ git status --short   # 应该是空的
 
 ---
 
-## 十、还缺的输入（开工前需要你定的）
+## 十一、还缺的输入（开工前需要你定的）
 
 1. **包名与仓库地址**：现在按 `dsh-plan-do` / `github.com/<owner>/plan-do-mode` 占位，
    R0 和 R7 都要用真实值。
