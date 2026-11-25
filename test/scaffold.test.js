@@ -201,6 +201,43 @@ test('两份命令白名单不许漂移：SCRIPT_COMMANDS ⊆ checks.ALLOWED_COM
   );
 });
 
+// REVIEW-tools §16.1(3)：`SAFE_SCRIPT_KEYS` 报 3/24 的假杀——`preview` / `clean` / `build:prod`
+// 这些是 `npm create vite` 默认就生成的键，却写不进去。加名字治不了根（`build:<任意>` 无穷），
+// 所以改成「小名单 + 冒号命名空间」。这条测试盯的是**行为级漂移**：
+// 同一个键，`plando_scaffold` 写得进去、`npm run <键>` 也得放行，反之亦然。
+test('脚本键两份判据不许漂移：scaffold 能写的键，npm run 也必须放行（§16）', async (t) => {
+  const checks = await import('../lib/checks.js');
+  const { isSafeScriptKey } = await import('../lib/scaffold.js');
+  const dir = tmpDir(t);
+  const keys = [
+    // 必须放行（真·脚手架默认生成的键）
+    'test', 'build', 'dev', 'preview', 'lint', 'format', 'clean', 'typecheck',
+    'test:unit', 'test:e2e', 'build:prod', 'build:dev', 'dev:client', 'test:watch', 'docs',
+    // 必须拒（生命周期钩子：npm install 时自动执行）
+    'postinstall', 'preinstall', 'prepare', 'prepublishOnly', 'prepack', 'postpack',
+    'install', 'postpublish', 'pretest', 'posttest',
+  ];
+  for (const key of keys) {
+    const viaScaffold = writeScaffold(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { [key]: 'vite build' } }), AI).ok;
+    const viaChecks = checks.validateCommand(`npm run ${key}`) === null;
+    assert.equal(viaScaffold, viaChecks,
+      `「${key}」两边结论不一致：scaffold=${viaScaffold} / npm run=${viaChecks}——两份判据要一起改`);
+    assert.equal(isSafeScriptKey(key), viaScaffold, `导出的判据要与 writeScaffold 一致：${key}`);
+    fs.rmSync(path.join(dir, 'package.json'), { force: true });
+  }
+  // 具体期望值也钉住，避免「两边一起错」也算通过
+  for (const key of ['preview', 'clean', 'build:prod', 'test:unit']) {
+    assert.equal(isSafeScriptKey(key), true, `${key} 应当放行`);
+  }
+  for (const key of ['postinstall', 'prepare', 'prepublishOnly']) {
+    assert.equal(isSafeScriptKey(key), false, `${key} 应当拒`);
+  }
+  // 冒号后面不许接路径 / 命令 / 通配，否则「命名空间」就成了万能后缀
+  for (const key of ['test:../../x', 'build:$(rm -rf /)', 'dev:;node -e 1', 'test:a b']) {
+    assert.equal(isSafeScriptKey(key), false, `畸形命名空间键应拒：${key}`);
+  }
+});
+
 test('放行：正常脚本形态照旧不受影响（不能因为收紧就误杀）', (t) => {
   const dir = tmpDir(t);
   const cases = ['node --test', 'npm test', 'npm run build', 'tsc', 'eslint .', 'vitest run', 'python -m pytest', 'cargo test'];
