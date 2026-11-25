@@ -260,6 +260,21 @@ test('plando_card 收尾必须有证据；无证据的 done 被拒且不落盘',
   assert.equal(after.cards[0].status, 'done');
 });
 
+test('错误文本不叠两层：下层已是完整形状时原样透传（回归）', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir, call } = await pushToBuild(registered, config);
+
+  // todo 卡直接 done：state/cards 返回的 reason 自带 plando：…——下一步：…
+  const rejected = await call('plando_card', { action: 'done', dir, id: 'c1' });
+  assert.ok(rejected.startsWith('plando：'), '必须以 plando： 开头');
+  assert.equal(rejected.match(/plando：/g).length, 1, `不应出现两层 plando：前缀：${rejected}`);
+  assert.equal(rejected.match(/——下一步：/g).length, 1, `不应出现两个下一步：${rejected}`);
+
+  // 非法转移同理
+  const badEvent = await call('plando_transition', { dir, event: 'cards_done' });
+  assert.equal(badEvent.match(/plando：/g).length, 1, `非法转移也不该叠前缀：${badEvent}`);
+});
+
 test('plando_check 只跑已声明的命令：未声明被拒、声明后能跑', async (t) => {
   const { registered, config } = registerAll(t);
   const { dir, call } = await pushToBuild(registered, config);
