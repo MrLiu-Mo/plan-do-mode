@@ -8,6 +8,9 @@ name: test
 on:
   push:
   pull_request:
+  # 手动重跑：首次推送时这个 workflow 才刚被创建，GitHub 不会为「引入它的那次 push」补跑，
+  # 所以留一个手动开关，省得为了触发 CI 而造一条空提交。
+  workflow_dispatch:
 
 jobs:
   test:
