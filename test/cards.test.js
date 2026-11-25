@@ -111,6 +111,41 @@ test('doneCard：todo 不能直接 done；stale 不能直接 done', () => {
   assert.match(r2.reason, /stale/);
 });
 
+// REVIEW-tools M4：`kind:'check'` 的 summary 只是自述——「跑了 npm test，退出码 0」这句话在
+// 从没跑过的时候一样写得出来。所以调用方把 .plando/last-check.json 的凭据传进来时要对账。
+test('doneCard：check 类证据要与真实执行记录对账（M4）', () => {
+  const evidence = { kind: 'check', summary: 'node --test 全绿' };
+
+  // 从没跑过 → 拒
+  const none = doneCard(doing(), 'c1', evidence, { lastCheck: null });
+  assert.equal(none.ok, false);
+  assert.match(none.reason, /没有任何执行记录/);
+
+  // 最近一次是**别的卡**的检查 → 拒（不能拿 c2 的绿灯给 c1 作证）
+  const other = doneCard(doing(), 'c1', evidence, { lastCheck: { name: 'c2', ok: true, exitCode: 0 } });
+  assert.equal(other.ok, false);
+  assert.match(other.reason, /不是这张卡/);
+
+  // 最近一次是这张卡但**没通过** → 拒
+  const failed = doneCard(doing(), 'c1', evidence, { lastCheck: { name: 'c1', ok: false, exitCode: 1 } });
+  assert.equal(failed.ok, false);
+  assert.match(failed.reason, /没通过/);
+
+  // 对得上 → 通过
+  const matched = doneCard(doing(), 'c1', evidence, { lastCheck: { name: 'c1', ok: true, exitCode: 0 } });
+  assert.equal(matched.ok, true, matched.reason);
+  assert.equal(matched.state.cards[0].status, 'done');
+
+  // files 类证据不要求检查记录（改文件本来就没有「退出码」）
+  const files = doneCard(doing(), 'c1', { kind: 'files', summary: '改了 src/app.js' }, { lastCheck: null });
+  assert.equal(files.ok, true, files.reason);
+
+  // 没传 lastCheck 这个键 → 不强制（纯函数调用方不该被文件系统依赖绊住；
+  // tools.js 每次都会传，所以插件运行时这条对账一定生效）
+  const noOption = doneCard(doing(), 'c1', evidence);
+  assert.equal(noOption.ok, true, '调用方没提供凭据时不做对账（由 tools.js 保证总会提供）');
+});
+
 test('downgradeCard：必须带理由；写 downgrades 留痕；已收尾不能再降', () => {
   const s = doing();
   assert.equal(downgradeCard(s, 'c1', '').ok, false);

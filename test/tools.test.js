@@ -314,6 +314,40 @@ test('错误文本不叠两层：下层已是完整形状时原样透传（回�
   assert.equal(badEvent.match(/plando：/g).length, 1, `非法转移也不该叠前缀：${badEvent}`);
 });
 
+test('端到端：check 类证据必须真有成功执行记录，自述不算（REVIEW-tools M4）', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir, call } = await pushToBuild(registered, config);
+  await call('plando_card', { action: 'start', dir, id: 'c1' });
+
+  fs.writeFileSync(path.join(dir, 'check-fail.mjs'), 'process.exit(1)\n', 'utf8');
+  fs.writeFileSync(path.join(dir, 'check-ok.mjs'), 'process.exit(0)\n', 'utf8');
+
+  // ① 一次都没跑就声称「跑了检查」→ 拒
+  const never = await call('plando_card', {
+    action: 'done', dir, id: 'c1', evidence: { kind: 'check', summary: 'node --test 全绿，退出码 0' },
+  });
+  assert.match(never, /没有任何执行记录|plando：/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.plando', 'state.json'), 'utf8')).cards[0].status, 'doing');
+
+  // ② 跑了但失败 → 不能拿失败记录当证据
+  await call('plando_card', { action: 'declare', dir, id: 'c1', command: 'node check-fail.mjs' });
+  await call('plando_check', { action: 'run', dir, name: 'c1' });
+  const failed = await call('plando_card', {
+    action: 'done', dir, id: 'c1', evidence: { kind: 'check', summary: 'node check-fail.mjs 退出码 0' },
+  });
+  assert.match(failed, /没通过|plando：/);
+
+  // ③ 真跑成功了才收得掉
+  await call('plando_card', { action: 'declare', dir, id: 'c1', command: 'node check-ok.mjs' });
+  const ran = await call('plando_check', { action: 'run', dir, name: 'c1' });
+  assert.match(ran, /退出码 0/);
+  const ok = await call('plando_card', {
+    action: 'done', dir, id: 'c1', evidence: { kind: 'check', summary: 'node check-ok.mjs 退出码 0' },
+  });
+  assert.match(ok, /已 done/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.plando', 'state.json'), 'utf8')).cards[0].status, 'done');
+});
+
 test('plando_check 只跑已声明的命令：未声明被拒、声明后能跑', async (t) => {
   const { registered, config } = registerAll(t);
   const { dir, call } = await pushToBuild(registered, config);
@@ -376,6 +410,32 @@ test('plando_scaffold 在 build 阶段放行 ai 项、拒绝 user 项与白名�
 
   const again = await scaffoldDef.execute({ dir, path: 'package.json', content: '{"name":"demo"}', techId: 't2' });
   assert.match(again, /未重复写入/);
+});
+
+// REVIEW-tools §9.6.3 N19：`--test-reporter-destination` 这类开关是**任意文件写**。
+// 这条路必须两端都断：declare 时不收，run 时（checks.json 可能被手改）再验一次。
+test('端到端：写文件开关进不了检查命令，项目外的文件不会被覆盖（N19）', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir } = await pushToBuild(registered, config);
+  const call = async (name, args) => registered.find((d) => d.name === name).execute(args);
+
+  // 项目外放一份「不能丢」的文件
+  const outside = path.join(config.defaultProjectDir, '..', 'NOTES.md');
+  fs.writeFileSync(outside, '不能丢\n', 'utf8');
+  t.after(() => fs.rmSync(outside, { force: true }));
+  const original = fs.readFileSync(outside, 'utf8');
+
+  const absolute = `node --test --test-reporter=spec --test-reporter-destination=${outside}`;
+  const declared = await call('plando_card', { action: 'declare', dir, id: 'c1', command: absolute });
+  assert.match(declared, /任意文件写|不允许/, `declare 就该拒：${declared}`);
+  assert.equal(fs.existsSync(checks.checksPath(dir)), false, '被拒的命令不该写进 checks.json');
+
+  // 绕过 declare、手改 checks.json（模拟旧版本或用户手改）→ run 时还要再拦一次
+  fs.mkdirSync(path.join(dir, '.plando'), { recursive: true });
+  fs.writeFileSync(checks.checksPath(dir), JSON.stringify({ c1: { command: absolute } }), 'utf8');
+  const ran = await call('plando_check', { action: 'run', dir, name: 'c1' });
+  assert.match(ran, /不安全|任意文件写/, `run 时也要拒：${ran}`);
+  assert.equal(fs.readFileSync(outside, 'utf8'), original, '项目外的文件必须原样不动');
 });
 
 test('终态产物：choose_handoff 渲染 HANDOFF.md，revise 渲染 CHANGE-GUIDE.md', async (t) => {

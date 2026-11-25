@@ -134,12 +134,12 @@ plugin_manager action=remove_bundle target=dsh-plan-do
 ## 6. 开发者自查（改完代码之后）
 
 ```bash
-node --test                     # 359 条，必须全绿
+node --test                     # 373 条，必须全绿
 node scripts/check-docs.mjs     # 文档与代码的交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 分发包冒烟：真打包 → 解开 → 真加载 → 跑一遍流程
 ```
 
-三条都在 CI 里跑（`.github/workflows/test.yml`，ubuntu + windows 双平台）。
+四条都在 CI 里跑（`.github/workflows/test.yml`，ubuntu + windows 双平台）。
 
 装本地目录版本时，改完代码**要重新装一次**（`link:` 指向目录，但 profile 里的配置是装那一刻生成的）。

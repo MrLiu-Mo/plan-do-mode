@@ -90,6 +90,31 @@ test('validateCommand：拒绝用 -r / --require / --import 加载任意模块',
   }
 });
 
+test('validateCommand：拒绝「写文件」类开关（N19 任意文件写）', () => {
+  const cases = [
+    'node --test --test-reporter=spec --test-reporter-destination=../NOTES.md',
+    'node --test --test-reporter-destination=C:\\Users\\me\\Documents\\NOTES.md',
+    'node --redirect-warnings=../w.txt --test',
+    'node --diagnostic-dir=../diag --test',
+    'node --report-directory=.. --test',
+    'node --report-filename=../r.json --test',
+    'node --heap-prof-dir=.. --test',
+    'node --cpu-prof-dir=.. --test',
+    'node --snapshot-blob=../snap.blob --test',
+    // 包管理器的转发形式也拦：`npm test -- --test-reporter-destination=…`
+    'npm test -- --test-reporter-destination=../x.txt',
+  ];
+  for (const cmd of cases) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `必须拒绝：${cmd}`);
+    assert.match(bad, /任意文件写/, `理由要说明这是写文件：${cmd} → ${bad}`);
+    // 理由里只出现开关名，不回显整条带路径的 token——否则 160 字预算全被路径吃掉。
+    assert.ok(!bad.includes('NOTES.md'), `理由不该回显路径：${bad}`);
+  }
+  // N15 那个合法用法不能被这条连坐。
+  assert.equal(validateCommand('node --test --test-reporter=spec'), null);
+});
+
 test('validateCommand：包管理器只许跑脚本，不许安装 / 执行任意包', () => {
   for (const cmd of [
     'npm install', 'npm i', 'npm ci', 'npm add left-pad',

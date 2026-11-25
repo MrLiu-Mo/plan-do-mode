@@ -97,17 +97,21 @@ test('拒绝：scripts 的值会执行任意代码（键名合法也要查值，
   assert.deepEqual(fs.readdirSync(dir), [], '被拒时不该落盘');
 });
 
-// REVIEW-tools §9.3：下面这三类当初全部放行，而且因为 plando_check 现在真能跑 npm test，
+// REVIEW-tools §9.3：下面这几类当初全部放行，而且因为 plando_check 现在真能跑 npm test，
 // 「AI 埋命令 → AI 自己执行」不再需要用户配合。每条都是实测过的绕过形态。
 test('拒绝：scripts 里的串联 / 环境变量前缀 / 非白名单命令名（§9.3 的绕过形态）', (t) => {
   const dir = tmpDir(t);
   const cases = [
-    // 串联：一条命令串两条
-    ['npm ci && node exploit.js', /串两条/],
-    ['true; node exploit.js', /串两条/],
-    ['node --test | tee out.txt', /串两条/],
-    ['node --test `whoami`', /串两条/],
-    ['node --test $(whoami)', /串两条/],
+    // 串联藏坏命令：现在 `&&` 是**分档**的（每段单独校验），所以拒绝理由落在坏的那一段上。
+    // 注意 `node --test && node evil.js` **仍然放行**——那是 §9.6.4 记录的已知残余
+    // （单独写 `node evil.js` 也一样放行），串联并没有让它更强：AI 写不出 .js 文件，
+    // 要构成攻击得是用户项目里本来就有那个文件。见 docs/REVIEW-tools.md §9.6.4 与 KNOWN-ISSUES。
+    ['npm ci && node exploit.js', /npm ci|安装|任意包/],
+    ['node --test && bash -c "rm x"', /不在允许/],
+    ['true; node exploit.js', /分号|「;」/],
+    ['node --test | tee out.txt', /管道|「\|」/],
+    ['node --test `whoami`', /反引号|「`」/],
+    ['node --test $(whoami)', /命令替换|「\$\("/],
     // 环境变量前缀：改造解释器行为
     ['NODE_OPTIONS=--require=./evil.cjs node --test', /环境变量/],
     ['PYTHONSTARTUP=./evil.py node --test', /环境变量/],
@@ -128,6 +132,73 @@ test('拒绝：scripts 里的串联 / 环境变量前缀 / 非白名单命令名
     assert.match(r.reason, expected, `理由要对得上（${script}）：${r.reason}`);
   }
   assert.deepEqual(fs.readdirSync(dir), [], '被拒时不该落盘');
+});
+
+// §9.6.2：收紧的代价是误杀。下面这一批**都是标准 build 写法**，一条都不能拒——
+// 误杀的代价是模型学着加前缀试错（`vite build` 拒、`npx vite build` 放行），比漏报更糟。
+test('放行：Vite / Next / CRA 项目的标准 scripts（§9.6.2 的误杀清单）', (t) => {
+  const dir = tmpDir(t);
+  const cases = [
+    'vite build',
+    'next build',
+    'react-scripts build',
+    'webpack --mode production',
+    'rollup -c',
+    'esbuild src/index.js --bundle --outfile=dist/out.js',
+    'nodemon src/server.js',
+    'tsx src/run.ts',
+    'rimraf dist && vite build',
+    'cross-env NODE_ENV=production vite build',
+    'cross-env NODE_ENV=test vitest run',
+    'rimraf dist && tsc -b && vite build',
+  ];
+  for (const script of cases) {
+    const content = JSON.stringify({ name: 'x', scripts: { build: script } });
+    const r = writeScaffold(dir, 'package.json', content, AI);
+    assert.equal(r.ok, true, `标准 build 写法被误杀：${script} → ${r.reason}`);
+    fs.rmSync(path.join(dir, 'package.json'), { force: true });
+  }
+});
+
+// 壳（cross-env / rimraf）不能变成第二个「什么都不查」的入口。
+test('拒绝：拿友好壳当跳板（壳后面的命令仍要过全套校验）', (t) => {
+  const dir = tmpDir(t);
+  const cases = [
+    // 壳的「环境变量」参数：名字能改变加载行为、值不能带空格/引号
+    ['cross-env NODE_OPTIONS=--require=./evil.cjs node --test', /改变加载行为|环境变量/],
+    ['cross-env PYTHONPATH=./evil node --test', /改变加载行为|环境变量/],
+    ['cross-env PATH=./evil node --test', /改变加载行为|环境变量/],
+    ['cross-env A="x y" node --test', /只能是字母数字|设成了/],
+    // 壳的「路径」参数：不许出项目
+    ['rimraf /etc && node --test', /项目外/],
+    ['rimraf ../../x && node --test', /项目外/],
+    // 壳后面接的仍是坏命令
+    ['rimraf dist && bash -c "rm x"', /不在允许/],
+    ['rimraf dist && node -e "process.exit(0)"', /任意代码|不代写/],
+    // 壳自己用法不对
+    ['cross-env NODE_ENV=production && vite build', /后面没有要执行的命令/],
+    ['rimraf && node --test', /没有要删的路径/],
+    ['cross-env node --test', /没有 KEY=VALUE/],
+  ];
+  for (const [script, expected] of cases) {
+    const content = JSON.stringify({ name: 'x', scripts: { test: script } });
+    const r = writeScaffold(dir, 'package.json', content, AI);
+    assert.equal(r.ok, false, `应被拒：${script}`);
+    assert.match(r.reason, expected, `理由要对得上（${script}）：${r.reason}`);
+  }
+  assert.deepEqual(fs.readdirSync(dir), [], '被拒时不该落盘');
+});
+
+// §9.6.2 建议 1：两份白名单一漂移，就出现「同一个命令能过 plando_check、却写不进 scripts」。
+// 这条断言把漂移变成红灯，而不是让用户发现「这个模式连 vite 都不认识」。
+test('两份命令白名单不许漂移：SCRIPT_COMMANDS ⊆ checks.ALLOWED_COMMANDS', async () => {
+  const checks = await import('../lib/checks.js');
+  const scaffold = await import('../lib/scaffold.js');
+  const missing = scaffold.SCRIPT_COMMANDS.filter((name) => !checks.ALLOWED_COMMANDS.includes(name));
+  assert.deepEqual(
+    missing, [],
+    `这些命令能写进 scripts 却过不了 plando_check：${missing.join(', ')}——两份名单要一起改`,
+  );
 });
 
 test('放行：正常脚本形态照旧不受影响（不能因为收紧就误杀）', (t) => {

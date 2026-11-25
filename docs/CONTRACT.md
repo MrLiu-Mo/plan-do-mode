@@ -228,6 +228,14 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 **写盘规则**：先写 `state.json.tmp`，再 `fs.renameSync` 覆盖——多会话共享同一份 state，
 半写文件比报错更糟。
 
+**证据要对账（`kind='check'`）**：`evidence.summary` 是**自述**，「跑了 npm test，退出码 0」这句话
+在从没跑过的时候一样写得出来。所以插件把每次 `plando_check` 的结果记在
+`<projectDir>/.plando/last-check.json`（`{ name, command, ok, exitCode, at }`，**不进** `state.json`：
+它属于运行记录，不是状态机数据，不参与版本迁移），`plando_card action=done` 时对账：
+`kind='check'` 必须存在 `lastCheck.name === card.id && lastCheck.ok === true` 的记录，否则拒；
+`kind='files'` 不要求（改文件本来没有退出码）。纯函数 `doneCard(state, id, evidence, options)`
+只在 `options` 里**有这个键**时才强制，`tools.js` 每次都会传，所以插件运行时对账一定生效。
+
 **id 字符集（硬约束）**：`cards[].id` 与 `tech.items[].id` 必须匹配 `^[A-Za-z0-9_-]{1,40}$`。
 原因不是洁癖：卡 id 会被当成文件名渲染成 `.plando/cards/<id>.md`，而 `../../README` 这种 id
 `path.join` 之后仍然落在项目目录内，`writeText` 的边界断言拦不住，用户自己的文件会被覆盖。

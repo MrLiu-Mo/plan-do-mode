@@ -1244,6 +1244,14 @@ node $env:TEMP\plando-review\probe71.mjs         # 实测 npm 链路在 Windows 
 > Lead 在 `7faeddb`（`fix(review): 闭合 REVIEW-state R1-R9 与 REVIEW-tools G1/G2/M1/M2/M4/L4/L7/L8`）、`ac84349`、`2c3c677`、`ab5f108` 里提交了针对本报告的一批修复。我用 §7 那套脚本**逐条对着 HEAD `ab5f108` 重跑**，结果分三部分：哪条真关上了（§9.2）、哪条还开着（§9.3）、这批修复自己引入了什么（§9.4）。
 >
 > 一句话结论：**14 条真正闭合，3 条部分闭合（G2 / M4 / L4），1 条收窄但没收死（L8）；L4 的修法还换来一个新高危 N14。G2 因为 `npm` 链路被同时修好，端到端攻击路径比修复前更短了。**
+>
+> **后续更新（三层）**：
+>
+> - **§9.6.1–§9.6.6**：Lead 提交 `76e37b8` 后重跑。G2 攻击面 14/15 闭合、N14 真修好；但 N15 的修法**新引入 N19（任意路径写入，高）**，且 G2 的修法**误杀 9/22 常见 build 写法**。
+> - **§9.6.7**：M4 的在途修复（`kind:'check'` 与真实执行记录对账）。
+> - **§9.6.8（最新）**：N19 与误杀**都已闭合**，`&&` 改成按段校验，「友好壳」有独立校验；误杀从 9/22 降到 0/10。**仍开的是 `npx` 第二份名单漂移、`--env-file` 读外部文件、`node evil.js`、以及 M4 的三个残余（`kind:'files'` / 全卡 downgrade / downgrade.reason）。**
+>
+> **当前有效的状态与优先级只看 §9.6.8。**
 
 ### 9.1 处置表
 
@@ -1421,7 +1429,9 @@ L8 的修法方向对（词元命中就按能力处理），但**没命中时仍
 
 **当下不是绕过**（预设没挂这些名字的工具），但 `node` / `python` / `git` 这三个名字**在别的 DSH 版本里很可能就是一个 shell 工具的别名**。建议：把 `unknown` 从「放行」改成「放行 + 记一次日志」，或者反过来——维护一个「已知只读」白名单（`read` / `grep` / `glob` / `present` / `todo_write` / `note_edit` / `plando_*`），其余 fail-closed。后者更符合这个模式「宁可误伤也不放行」的取向。
 
-### 9.5 复核后的优先级
+### 9.5 第一轮修复后的优先级（`ab5f108` 那棵树）
+
+> 这一节的排序在第二轮（§9.6.6）已经被改写——G2 与 N14 都关上了，腾出的位置被 N19 占上。**当前有效的优先级只看 §9.6.6。**
 
 **判决没变（§6 仍是 fix-first），但待办从 2 条变成 3 条，且第一条更难绕**：
 
@@ -1444,6 +1454,234 @@ node $env:TEMP\plando-review\probe80.mjs          # N15：--test-reporter 内置
 ```
 
 *§9 的复核过程同样没有改动 `lib/` 与 `test/`；本节唯一改动是追加这段文字。*
+
+---
+
+### 9.6 第二轮：`76e37b8` 那棵树上的复核（G2 换了一种形态活下来，还带进来一个任意写）
+
+> **这一节复核的是提交 `76e37b8`（「闭合 §9.3 G2 与新发现 N14–N17，补分发包冒烟」）。** §9.1–§9.5 描述的是它上一棵 `ab5f108`，两节的「现状」列不一致是正常的——本节更新。本节同样是复核证据，**不是新判决**；判决仍在 §6。
+
+#### 9.6.1 这一轮真的修好了什么
+
+| 项 | 修法 | 我的复测结果（脚本在 `%TEMP%\plando-review\`） |
+|---|---|---|
+| **G2**（§9.3 那批 payload） | 新增 `scaffold.validateScriptValue(key, value, validateCommand)`，四道：① 串联字符 `&&` `\|\|` `;` `\|` 反引号 `$(` 一律拒；② 环境变量前缀一律拒；③ 命令名必须在 `SCRIPT_COMMANDS` 里；④ 整条命令交给注入的 `checks.validateCommand` 做 argv 级校验 | **14/15 攻击形态被拒**（`probe-final46.mjs` A 段）：`python -X utf8 -c` / `python -u -c` / `py -3 -c` / `python3.12 -c` / `npm install <包>` / `npm ci` / `npx <包>` / `bash -c` / `npm ci && node x` / `true; node x` / `NODE_OPTIONS=…` / `tar` / `./evil.sh` / `node -e` / `curl … \| sh` 全拒。**§9.3 那条 4 次调用到 `done` 的链子断了** |
+| **N14**（写侧没有与读侧对齐） | `project.saveState` 落盘前量字节数，超过读上限 80%（`MAX_WRITE_BYTES` ≈ 1.6 MB）就拒写，并用 `largestFields()` 指出最大的 3 个字段 | **已闭合**：`clarify questions` 5 MB / `card done evidence.summary` 3 MB / `tech_ok items[].title` 2.5 MB 三例**全部被拒**，`state.json` 停在 1–2 KB，**项目仍然可读**（`probe-final46.mjs` C 段）。§9.4 里「一次调用就把项目写成永久读不出来」这条不可逆故障没了 |
+| **N15**（`--test-reporter` 误杀） | 从 `INTERPRETER_DENY_FLAGS` 移除，改成 `FLAGS_WITH_SAFE_VALUES` 白名单（`spec` / `tap` / `dot` / `junit` / `lcov` / `github`）+ `looksLikeModulePath()` | **误杀已修**：6 个内置名全放行，`--test-reporter=./evil.cjs` 仍拒（`probe80.mjs` / `probe-final46.mjs` D 段）。**但这个改动顺手打开了 N19**，见 §9.6.3 |
+| **N16**（reject 日志缺字段） | `run(args, body, deps, toolName)` + `logRejection` 写入 `tool` 与 `dir` | **已闭合**：字段现在是 `["at","kind","source","tool","dir","reason"]`，能看出是哪个工具、哪个项目被拒（`probe-final46.mjs` E 段） |
+| **N17**（`init` 成功消息过长） | `shortPath(dir)`：超过 60 字只留尾部两段 | **改善，未闭合**：420 字 → **250 字**（3 层 ×120 字深目录，`probe-final51.mjs`）。仍超 160，但 160 那条只约束错误文本，算观察项 |
+
+#### 9.6.2 这一轮的代价：合法 `scripts` 被误杀 9/22
+
+`SCRIPT_COMMANDS` 是一份**新写的白名单**，和 `checks.ALLOWED_COMMANDS` **不是同一份**。两处一漂移，就出现「同一个命令能过 `plando_check` 的校验，却写不进 `package.json` 的 `scripts`」——而 `scripts` 恰恰是真实项目里最常见的地方。
+
+实测（`probe-final46.mjs` B 段，真 `plando_scaffold` 调用、真看文件落不落盘）：
+
+| `scripts` 值 | 结果 | 说明 |
+|---|---|---|
+| `npm test` / `node --test` / `vitest run` / `tsc -b` / `tsc --noEmit` / `eslint .` / `prettier --write .` / `jest` / `pytest -q` / `python -m pytest` / `cargo test` / `npx vite build` / `npm run build` | **放行** | ✅ 「跑测试」这一类覆盖到了 |
+| **`vite build`** | **拒绝** | `SCRIPT_COMMANDS` **有** `vite`，`checks.ALLOWED_COMMANDS` **没有** → 被第 ④ 层拒掉。**这是两份白名单不一致的直接证据** |
+| **`next build`** / **`react-scripts build`** / **`webpack --mode production`** / **`rollup -c`** / **`esbuild …`** / **`nodemon …`** / **`pm2 start …`** | **拒绝** | 不在 `SCRIPT_COMMANDS` 里 |
+| **`cross-env NODE_ENV=production vite build`** | **拒绝** | 以环境变量赋值开头 → 被规则 ② 拒。**但这恰好是 Windows / 跨平台 build 的标准写法** |
+| **`rimraf dist && vite build`** | **拒绝** | 含 `&&` → 被规则 ① 拒。**这也是极常见的 build 写法** |
+
+**代价是实打实的**：这个模式的自我定位是「帮你搭项目脚手架」，但**一个 Vite / Next.js / CRA 项目的标准 `package.json` 它写不了**——AI 只能写 `scripts.build = "npm run build"` 这种自我指涉的东西，或者干脆放弃写 `scripts`。用户看到的现象是「这个模式连 `package.json` 都不会写」。
+
+**更麻烦的是错误文案会误导模型往绕路上走**（`probe-final40.mjs` 取到的原文）：
+
+```
+scripts.test = "vite build"  →  「vite」不在允许的检查命令里
+                               （只认 node / npm / pnpm / python / cargo 这类构建与测试工具）
+```
+
+`vite` 明明就是个构建工具。而且**同一件事两种写法一拒一放**：`vite build` 拒、`npx vite build` 放——模型试两次就会学到「加个 `npx` 前缀就过了」，这等于**把白名单教成了一道可以试错的谜题**。
+
+**建议（都不降低安全性）**：
+
+1. **单一事实来源**：`SCRIPT_COMMANDS` 直接由 `checks.ALLOWED_COMMANDS` 派生，或至少加一条测试断言「`SCRIPT_COMMANDS` 的每一项都必须在 `ALLOWED_COMMANDS` 里」。现在没有这条测试，所以 `vite` 的漂移没人发现；
+2. **放行已知的构建 / 开发工具名**（`vite` `next` `react-scripts` `webpack` `rollup` `esbuild` `parcel` `nodemon` `pm2` `tsx` `ts-node` `serve`）：它们都是「跑用户已经装好的依赖」，风险和 `vitest` / `jest` 同级；
+3. **放行「友好壳」前缀**（`cross-env` `dotenv` `env-cmd` `rimraf` `shx`）：它们本身不执行任意代码，允许出现在第一个 token，**但第二个 token 起仍要过 `validateCommand`**；
+4. **`&&` 规则分档**：只拒「右侧不是白名单命令」的串联，而不是见到 `&&` 就拒——现在的实现误伤面太大。
+
+#### 9.6.3 N19　`--test-reporter-destination` 变成**任意路径写入**，一条命令能覆盖用户任何文件　【高，本轮新引入】
+
+N15 的修法把 `--test-reporter-destination` **从 `INTERPRETER_DENY_FLAGS` 里整条删掉**了（只给 `--test-reporter` 加了值白名单）。但这个开关的语义是「**把测试报告写到这个路径**」——它是一个**写文件**能力，路径完全由命令串决定；`spawnSync` 的 `cwd` 设在项目根也拦不住 `..` 和绝对路径。
+
+**端到端复现（`probe-final45.mjs`，两次 `plando_*` 调用，用户零操作）**：
+
+```
+① 用户在项目外有一份文件：C:\Users\me\Documents\NOTES.md（61 字节，含「不能丢」）
+
+② plando_card { action:'declare', dir, id:'c1',
+     command: 'node --test --test-reporter=spec --test-reporter-destination=C:\\Users\\me\\Documents\\NOTES.md' }
+   → 已为卡片 c1 声明检查命令：…        （declare 校验通过）
+
+③ plando_check { action:'run', dir, name:'c1' }
+   → · 检查 c1：通过｜退出码 0
+
+④ NOTES.md 现在 144 字节：
+   "✔ 用户的测试 (0.7ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\n…"
+   含「不能丢」= false                  ← 用户的文件被整份覆盖，原文不可恢复
+```
+
+三种路径形态**全部**实测可写（`probe-final50.mjs`）：
+
+| 形态 | declare | run | 写到项目外 |
+|---|---|---|---|
+| 绝对路径 `C:\…\abs-target.txt` | 放行 | 通过 | **是**（项目外 2 层） |
+| 相对路径 `../rel-target.txt` | 放行 | 通过 | **是**（项目外 1 层） |
+| 相对路径 `../../rel2-target.txt` | 放行 | 通过 | **是**（项目外 2 层） |
+
+**还能干更坏的事**：把目标指向 `.plando\state.json` 自己（`probe-final45.mjs` ③）——
+
+```
+plando_card declare 'node --test --test-reporter=spec --test-reporter-destination=<dir>\.plando\state.json'
+plando_check run  → · 检查 c1：通过｜退出码 0
+→ state.json 现在还像 JSON 吗 = false     ← 项目状态被测试报告覆盖
+→ 项目现在可读吗 = false                  ← 项目变砖
+```
+
+这条比 N14 更狠：N14 至少还被写侧上限挡着（拒写、原状态可读），**这条是直接覆盖一个已经存在的文件，而且根本不经过 `saveState`，写侧上限管不到**。它还和 `plando_check` 的设计意图完全无关——检查本该只读。
+
+**为什么算「本轮新引入」**：`ab5f108` 那棵树上 `--test-reporter-destination` 在 `INTERPRETER_DENY_FLAGS` 里，一条 `node --test --test-reporter-destination=…` 在 `declare` 阶段就被拒；把它和 `--test-reporter` 一起放开才出现的。N15 的误杀只针对「`--test-reporter=<内置名>`」，这两个开关语义完全不同，**不该一起放**。
+
+**修法（建议两条都做）**：
+
+1. **把 `--test-reporter-destination` 重新加回 `INTERPRETER_DENY_FLAGS`**。它是「写文件」，不属于「跑检查」，没有正当理由出现在检查命令里；
+2. 如果要支持，则值必须**解析后落在 `dir` 内**（`path.resolve(cwd, value)` 以 `path.resolve(dir)` 开头），且不许命中 `.plando/`。但这要求 `validateCommand` 拿到 `dir`——目前签名只有 `command`，**改造成本比直接拒高得多**。
+
+**同一类风险值得顺手排查一遍**（`probe-final52.mjs`，全部**当前放行**）：
+
+| 开关 | 放行 | 说明 |
+|---|---|---|
+| `--test-reporter-destination=<任意路径>` | 是 | 本节的 N19 |
+| `--report-directory` / `--report-filename` / `--report-on-fatalerror` | 是 | 诊断报告，写到任意目录 |
+| `--cpu-prof-dir` / `--heap-prof-dir` / `--diagnostic-dir` | 是 | 同样是任意目录 |
+| `--redirect-warnings=<任意路径>` | 是 | 直接写文件 |
+| `--snapshot-blob` / `--build-snapshot` | 是 | 写 / 读快照二进制 |
+| `--env-file` / `--env-file-if-exists` | 是 | 读任意环境文件（读侧） |
+| `cargo clean` / `go clean -cache` | 是 | 删构建产物（破坏性，但不是任意路径） |
+
+**这不是「一条漏网之鱼」，是一整类**。建议在 `INTERPRETER_DENY_FLAGS` 之外单列一个 `PATH_FLAGS`，规则是「值必须落在 `dir` 内」或干脆全拒；至少 `--test-reporter-destination` 与 `--redirect-warnings` 应该立刻拒。
+
+#### 9.6.4 `node evil.js`：唯一剩下的 G2 开口，但风险已被 G1 抵消
+
+`scripts.test = 'node evil.js'` 仍然放行（`probe-final46.mjs` A 段）。看上去是「AI 埋一条 `node evil.js`」，但要真被执行，`evil.js` 必须**已经在项目里**——而 AI 写不出 `.js`（`scaffold` 白名单只有 7 个配置文件，`.js` 一律拒），`plando_check` 也不能写文件。
+
+所以残余风险是：**用户项目里本来就有那个 `evil.js`**（或 AI 之前通过别的渠道留下的），AI 能把它挂到 `npm test` 上。这比 §9.3 的 `python -X utf8 -c` 弱得多，**可以进 KNOWN-ISSUES**——但前提是先修 N19，否则没有意义（N19 是更强的任意写）。
+
+#### 9.6.5 M4：`76e37b8` 上仍原样（**在途修复见 §9.6.7**）
+
+`probe-final46.mjs` F 段：
+
+- `evidence {kind:'check', summary:'我懂了'}` → 拒
+- `'跑了一下'` / `'everything works'` / `'跑了 vite build，退出码 0'` → **全部通过**
+- 全卡 `downgrade` → `cards_done` → `ship_pass{explain:'好了'}` → `stage=done`，项目里只有 `IDEA.md` + `TECH.md`，没有 `checks.json`
+
+和 §9.1 里记的状态一致：**这是从头到尾唯一一条一轮都没被碰过的中危。** `§10` 里 Lead 也把它记成了「部分闭合，本轮不做」。
+
+#### 9.6.6 第二轮（`76e37b8`）的净结果
+
+> ⚠ **这一段的「仍开」列表已被 §9.6.7 / §9.6.8 更新**：N19 与误杀在 §9.6.8 里都关上了，M4 的 `kind:'check'` 在 §9.6.7 里修好。保留这段是因为它记录了「修完一轮之后净变化是什么」的当时判断。**要看现状看 §9.6.8 末尾。**
+
+| 项 | 对比 §9.1 的变化 |
+|---|---|
+| G1 / G3 / G4 / M1 / M2 / M3 / M5 / M6 / L1 / L2 / L3 / L5 / L6 / L7 | 保持闭合，无回归 |
+| **G2** | **攻击面基本闭合**（14/15）。但换来 ① 误杀 9/22 常见 build 写法、② 两份白名单漂移、③ `node evil.js` 仍开 → **从「高」降到「中 + 体验问题」** |
+| **N14** | **已闭合**（写侧 80% 上限 + 指出大字段）。§9.4 里最不可逆的那条没了 |
+| **N15** | 误杀已修，**但引入 N19（高）** |
+| **N19（新）** | **任意路径写入 / 覆盖用户文件 / 覆盖 `state.json` 让项目变砖**。两次 `plando_*` 调用，端到端复现见 §9.6.3 |
+| **N16** | **已闭合**（日志带 `tool` + `dir`） |
+| **N17** | 改善（420 → 250 字），观察项 |
+| **N18** | 未动（Lead 的决定是「不改，把前提写成断言」，已记在 §10） |
+| **M4** | `76e37b8` 上未动；**在途修复已让 `kind:'check'` 对账生效**（见 §9.6.7），但 `kind:'files'` / 全卡 downgrade / downgrade reason 三个口子仍开 → **部分闭合** |
+
+**净结果一句话**：G2 的洞被堵上了，N14 也真修好了，**但腾出来的位置立刻被 N19 占上**——一个能覆盖用户任意文件、还能把 `state.json` 覆盖成非 JSON 的写能力，而且它是由「修 N15 误杀」这个纯体验修复顺带放出来的。**判决仍然是 fix-first**（§6 不变），只是待办换了：
+
+| 优先 | 项 | 一句话 |
+|---|---|---|
+| 1 | **N19** | `--test-reporter-destination`（以及 `--redirect-warnings` / `--*-dir` / `--snapshot-blob`）加回拒绝列表，或值必须在 `dir` 内。**这是现在唯一的「任意文件写」** |
+| 2 | **G2 的代价** | `SCRIPT_COMMANDS` 由 `ALLOWED_COMMANDS` 派生 + 加漂移断言 + 放行 `vite` / `next` / `webpack` 这类构建工具 + `cross-env` / `rimraf` 壳 + `&&` 分档。**这条不修，脚手架功能的实际可用性会明显偏低** |
+| 3 | **M4 的剩余三口** | `kind:'files'` 验路径存在 / 全卡 downgrade 不许零产出到 done / `downgrade.reason` 复用 `checkEvidenceObservable`（`kind:'check'` 的对账已在 §9.6.7 修好，不再是「一直没动过」） |
+
+进 KNOWN-ISSUES：`node evil.js`、N17（250 字）、N18（未知名 fail-open，已由 `test/preset.test.js` 的断言兜住前提）、`--watch` / `--inspect-brk` 挂满 60s 超时、`deno run` / `bun run` 形态放行、`cargo clean` / `go clean` 放行。
+
+---
+
+#### 9.6.7 在途复核：M4 的修复（工作树，尚未提交）
+
+复核 §9.6 的过程中工作树又被改了：`lib/cards.js` 的 `doneCard` 多收一个 `options.lastCheck`，`kind:'check'` 的证据要和 `.plando/checks.json` 里**最近一次真实执行记录**对账。我对着这棵在途树重跑了 M4（`probe-final53.mjs` / `probe-final54.mjs` / `probe-final55.mjs`，`node --test` 368 全绿）。
+
+**已经修好的部分（这是 M4 第一次被真正修）**：
+
+| 场景 | 修复前 | 现在 |
+|---|---|---|
+| 没跑过检查就说「跑了 vite build，退出码 0」 | 通过 | **拒绝**：「卡片 c1 说跑了检查，但 `.plando/` 里没有任何执行记录」 |
+| 没跑过检查说「跑了一下」/「everything works」 | 通过 | **拒绝**（同上） |
+| 检查**真的跑失败**了（退出码 1），再声称「跑了」 | 通过 | **拒绝**：「卡片 c1 的检查上次没通过（退出码 1）」 |
+| 真的跑过且退出码 0，再收尾 | 通过 | **通过**（正常路径没被误伤） |
+| 拿**别的卡**的检查记录来给本卡收尾 | 通过 | **拒绝**：「最近一次检查是「c2」的，不是这张卡（c1）的」 |
+
+这是对的方向：**「说得出可核对的东西」从字面检查变成了真的有凭据**。而且它只在调用方注入 `lastCheck` 时强制（纯函数调用不受影响），实现上很克制。
+
+**仍然开着的三个口子**（都在同一处，建议下一轮一起收）：
+
+1. **`kind:'files'` 完全不验**。`evidence {kind:'files', summary:'创建了完全不存在-abc123.py，第 5 行是 main'}` → **通过**（项目里根本没有这个文件）。`kind:'check'` 现在有凭据要求了，`kind:'files'` 却还是纯自述——**换一个 `kind` 就绕回去了**，成本为零。修法：`kind:'files'` 时把 summary 里的路径抽出来做一次 `fs.existsSync`（至少要存在于 `dir` 内），或者干脆要求同时给一个 `files: []` 数组由工具自己验。
+2. **全卡 `downgrade` 依然能零产出到 `done`**。`probe-final55.mjs`：c1 是唯一的卡 → `downgrade reason:'时间不够'` → `cards_done` → `ship_pass{explain:'好了'}` → **`stage=done`，项目里只有 `IDEA.md` + `TECH.md`，没有 `checks.json`，没有一行用户代码**。M4 的证据要求在 `downgrade` 这条路上根本没被经过——它只挡 `done`，不挡「全部降级」。修法：`cards_done` 时若「成功完成的卡 = 0」，要求 `ship_pass.explain` 说清「这一轮具体交付了什么」并落到 `HANDOFF.md`，或者直接拒绝推进。
+3. **`downgrade` 的 `reason` 不验**。`reason:'x'` → 「卡片 c1 已 downgrade。」；`reason:'我懂了'` → 同样通过。**卡片降级是这个模式里唯一「可以不做」的出口**，理由却连长度和空话都不查——和 `evidence.summary` 有一套 `checkEvidenceObservable` 相比，这里是不设防的。修法：`reason` 复用 `checkEvidenceObservable`（≥4 字 + 去空话），并要一句「为什么这一轮做不了」。
+
+**所以 M4 的现状应该改成「部分闭合（`kind:'check'` 已对账；`kind:'files'` / 全卡 downgrade / downgrade reason 三个口子仍开）」**，而不是「本轮不做」。
+
+#### 9.6.8 第三轮：`&&` 分档 + 写文件开关收口之后的复核
+
+§9.6.7 写完之后工作树又动了一轮（`lib/checks.js` / `lib/scaffold.js` / `lib/cards.js`、`docs/CONTRACT.md` / `docs/INTERFACES.md`、三个测试文件）。这一轮把 §9.6.2 的误杀和 §9.6.3 的 N19 一起收了。**复核时 `node --test` 371 / 371 全绿、`check-docs` 全过**，所以下面这些结论是在绿树上测的。
+
+**关上的**：
+
+| 项 | 上一轮（§9.6.3 / §9.6.2） | 这一轮 |
+|---|---|---|
+| **N19 任意路径写入** | `--test-reporter-destination=<任意路径>` 在 `declare` 阶段放行，`run` 时覆盖用户文件、覆盖 `state.json` 把项目写死 | **已闭合**。`probe-final50.mjs` 三种形态（绝对 / `../` / `../../`）**全部在 `declare` 阶段被拒**；`probe-final45.mjs` 里 `NOTES.md` 内容原样保留、`state.json` 仍是合法 JSON、项目仍可读。文案：「会把报告写到命令里指定的路径（等于任意文件写），检查命令不允许」 |
+| 同类写文件开关 | `--redirect-warnings` / `--cpu-prof-dir` / `--heap-prof-dir` / `--report-directory` / `--report-filename` / `--snapshot-blob` 全部放行 | **一并拒了**（`probe-final52.mjs` 那 15 个里只剩 `--env-file` 一个放行，见下面「仍开」） |
+| **§9.6.2 误杀** | `vite build` / `next build` / `webpack` / `cross-env …` / `rimraf … && vite build` 全拒，9/22 | **`probe-final58.mjs` 十条约 0/10 误杀**；`probe-final39.mjs` 的 23 条常见写法只剩 `npx next build` 一条被拒。`SCRIPT_COMMANDS` 与 `ALLOWED_COMMANDS` 之间有漂移断言（`test/scaffold.test.js`「两份命令白名单不许漂移」），差集现在只剩 `pip` / `uv` 两个**故意**排除的 |
+| `&&` 一律拒 | `rimraf dist && vite build` 被误杀 | 改成**分档**：`&&` / `\|\|` 切段、**每段单独过全套校验**。`npm ci && node exploit.js` 仍拒（理由落在坏的那段：「「npm ci」会安装或执行任意包」），`rimraf dist && vite build` 放行。**这个改法是对的**，而且拒绝理由比之前精确 |
+| 「友好壳」跳板 | — | 新增 `cross-env` / `dotenv` / `env-cmd` / `rimraf` 四个壳，各自独立校验：改加载行为的环境变量名（`NODE_OPTIONS` / `PYTHONPATH` / `PATH` / `LD_PRELOAD` …）一律拒、值只允许裸字、`rimraf` 的路径必须落在项目内。**`rimraf /etc`、`cross-env PATH=./evil`、`cross-env A="x y"`、`cross-env NODE_ENV=production && vite build`（后面没命令）实测全拒，文案都对得上** |
+| **M4 `kind:'check'`** | 「跑了一下」直接过 | 已对账（§9.6.7）。这一轮 `test/cards.test.js` 把「没跑过 / 跑失败 / 拿别的卡」三种都钉成了测试 |
+
+**仍然开着的（按严重度排）**：
+
+1. **`npx` 的白名单又漂移了（同一类问题，第二次）**。`KNOWN_TOOLS` 只有 11 项（`tsc` / `eslint` / `prettier` / `vitest` / `jest` / `mocha` / `vite` / `ruff` / `mypy` / `black` / `pre-commit`）。结果：`npx next build` / `npx webpack` / `npx rollup -c` / `npx esbuild` / `npx parcel build` / `npx react-scripts build` / `npx tailwindcss` / `npx playwright` / `npx prisma` **全拒**，而**去掉 `npx` 的同一条命令全放行**。这和 §9.6.2 里 `vite build` vs `npx vite build` 是同一个病，只是方向反了。**建议**：`npx` 的判定改成「包名（去掉 `@version`）∈ `ALLOWED_COMMANDS` ∪ `KNOWN_TOOLS`」，并加一条「`npx X` 放行 ⟺ `X` 在 ∪ 里」的断言。「`npx <工具>` 用的是本地已装依赖还是现下载，`npx` 自己会先查 `node_modules/.bin`」——按包名判断已经够，不用两套名单。
+2. **`--env-file` / `--env-file-if-exists` 仍放行**（`--env-file=C:\x\.env` 也行）。它是**读**不是写，但能把项目外的环境变量读进来——如果那份文件里有 token，`node --test` 能把它打到 stdout，再经 `plando_check` 的输出回到模型手里。风险比 N19 低（不破坏文件），属同一类「值是一个路径的开关」。**建议**：与 N19 同一处收口，值必须落在 `dir` 内。
+3. **`node evil.js` 仍放行**（单独写、以及 `node --test && node evil.js` / `npm test && node evil.js` 这类串联）。和 §9.6.4 一致：要真被执行，`evil.js` 得先在项目里，而 AI 写不出 `.js`（`scaffold` 白名单只有 7 个配置文件）。**进 KNOWN-ISSUES 是合理的**，`test/scaffold.test.js` 里也已经用注释把这个前提写清楚了。
+4. **`kind:'files'` 仍不验**、**全卡 `downgrade` 仍能零产出到 `done`**、**`downgrade.reason` 仍不验**（§9.6.7 那三条，这一轮没动）。`probe-final55.mjs` 复测：`kind:'files'` 三条全过（含「创建了完全不存在-abc123.py」）；唯一一张卡 downgrade → `cards_done` → `ship_pass{explain:'好了'}` → **`stage=done`，项目里只有 `IDEA.md` + `TECH.md`**；`reason:'x'` 与 `reason:'我懂了'` 都过。**这是现在最实质的一条**——它不涉及安全，但直接决定「这个模式会不会让用户以为自己交付了东西」。
+
+**三轮回溯：G2 这条线到底怎么走完的**（有教育意义，建议留着）：
+
+| 轮次 | 状态 |
+|---|---|
+| `ab5f108`（§9.3） | `scripts` 值走 denylist，`python -X utf8 -c` 一条就绕，4 次调用到 `done` |
+| `76e37b8`（§9.6.1） | 改白名单 + 串联字符 + 环境变量前缀 + 注入 `checks.validateCommand` → **攻击面 14/15 关闭**，但**误杀 9/22**、且白名单与 `checks` 漂移 |
+| 本轮（§9.6.8） | 误杀 0/10、两份白名单加漂移断言、`&&` 分档、友好壳、补漂移断言 → **G2 可以判「中危闭合」** |
+
+每一步都在**修上一个修法带来的副作用**，其中一次（`--test-reporter`）还顺手放出了 N19。这不是说修错了方向，而是说明这类「按字符串判危险」的过滤器**每收一次边界都会移动误杀面**，所以两侧都得有回归测试——现在 `test/scaffold.test.js` 里「拒绝」与「放行」是分开两组写的，这点做对了。
+
+---
+
+**§9.6 的重跑命令**：
+
+```powershell
+node $env:TEMP\plando-review\probe-final46.mjs   # 本节全部：A 攻击面 / B 误杀 / C N14 / D N15+N19 / E N16 / F M4
+node $env:TEMP\plando-review\probe-final45.mjs   # N19 端到端：覆盖用户 NOTES.md、再覆盖 state.json 把项目写死
+node $env:TEMP\plando-review\probe-final50.mjs   # N19 三种路径形态（绝对 / ../ / ../../）全部写到项目外
+node $env:TEMP\plando-review\probe-final40.mjs   # 误杀时的完整错误文案（看模型会不会被带偏）
+node $env:TEMP\plando-review\probe-final52.mjs   # 同类写文件开关的扫描（15 个 node 开关 + 9 个命令）
+node $env:TEMP\plando-review\probe-final53.mjs   # §9.6.7：M4 的 kind:check 对账（没跑过 / 跑失败 / 真的过了）
+node $env:TEMP\plando-review\probe-final55.mjs   # §9.6.7：kind:files 不验 / 全卡 downgrade 零产出 / downgrade reason 不验
+node $env:TEMP\plando-review\probe-final58.mjs   # §9.6.8：误杀面（10 条常见 build 写法，现在 0/10）
+node $env:TEMP\plando-review\probe-final45.mjs   # §9.6.8：N19 回归（覆盖 NOTES.md 与 state.json 现在都不成立）
+node $env:TEMP\plando-review\check-tables.mjs    # 报告自身的表格列数校验（23 块 / 169 行 / 0 异常）
+```
+
+*本节同样没有改动 `lib/` 与 `test/`；我这一轮唯一写的文件就是这份报告。*
 
 ---
 
@@ -1472,3 +1710,85 @@ node $env:TEMP\plando-review\probe80.mjs          # N15：--test-reporter 内置
 - `--watch` / `--inspect-brk` 会让检查挂满 60 秒超时（有超时兜底，不是安全问题）。
 - `deno run x.ts` / `bun run x.ts` 放行：这两个解释器的核心用法就是执行文件，argv 上无法与「跑检查」区分（§8.7 已记）。
 - 三处 `minutes` 计算仍是独立实现（`state.checkBudget` / `state.computeSize` / `artifacts.renderTech`），口径已统一但没抽公共函数。
+
+---
+
+## 11. §9.6 的处置记录（Lead 收到第二轮复核后同一轮内完成）
+
+§9.6 的结论是：G2/N14/N16 真的修好了，但 N15 的修法**顺带打开了 N19（任意文件写，高）**，G2 收紧**误杀 9/22 条常见 build 写法**，M4 从头到尾没动。下面是逐条处置。
+
+`node --test` **373 passed / 0 failed**；`check-docs` / `verify-pack` / `smoke-pack` 全过。
+
+| # | 处置 | 落在哪 |
+|---|---|---|
+| **N19**（高，`--test-reporter-destination` = 任意文件写） | **已闭合**。新增 `WRITE_FILE_FLAGS` + `writeFileFlagName()`，**整类拒绝**而不是判路径是否在项目内：一条检查命令没有任何合法需求去写报告文件（产物本来就该走 stdout，工具会截断收下），而「值在不在项目内」要跟 resolve + 符号链接 + 盘符 / UNC 一路判断，判错一次就是静默覆盖用户文件。收掉的开关：`--test-reporter-destination`（原凶）、`--redirect-warnings`、`--diagnostic-dir`、`--report-directory`、`--report-filename`、`--heap-prof-dir`、`--cpu-prof-dir`、`--snapshot-blob`、`--disk-cache-dir`。检查放在 `validateCommand` 的**最前面**，所以 `npm test -- --test-reporter-destination=…` 这种转发形态也拦 | `lib/checks.js` |
+| **G2 的代价**（误杀 9/22） | **已修**，见下四条 | `lib/scaffold.js`、`lib/checks.js` |
+| └ ① 两份白名单漂移 | `SCRIPT_COMMANDS` 现在与 `checks.ALLOWED_COMMANDS` 同集合（少 `pip`，装包不属于跑脚本），并加**漂移断言**：`SCRIPT_COMMANDS ⊆ ALLOWED_COMMANDS`，不一致立刻红 | `test/scaffold.test.js` |
+| └ ② 构建工具被拒 | `ALLOWED_COMMANDS` 补进 `vite` / `next` / `react-scripts` / `webpack` / `rollup` / `esbuild` / `parcel` / `nodemon` / `pm2` / `tsx` / `ts-node` / `serve`——它们的共同点是「跑用户项目里已装好的依赖」，不下载、不 eval，风险和 `vitest` / `jest` 同级 | `lib/checks.js` |
+| └ ③ `&&` 一刀切 | 改**分档**：`&&` / `\|\|` 允许，但**每一段**单独过关（都过命令名白名单 + argv 级校验）。切段时把引号里的分隔符当普通字符（`node -e "a && b"` 不会被切成两段）。`;` `\|` 反引号 `$(` 仍整条拒——合法 build 写法几乎不需要它们。另加「最多 8 段」的护栏 | `lib/scaffold.js` |
+| └ ④ 友好壳 | `cross-env` / `dotenv` / `env-cmd`（设环境变量）与 `rimraf`（清目录）可以出现在段首，但**壳自己的参数也要查**：环境变量名不许是 `NODE_OPTIONS` / `PYTHONPATH` / `PATH` / `LD_PRELOAD` 这类改变加载行为的名字，值只允许裸字（带空格 / 引号的值正是「壳里塞第二条命令」的手法）；`rimraf` 的目标不许绝对路径、不许 `..`。壳后面接的命令仍走全套校验 | `lib/scaffold.js` |
+| **M4**（中，证据不验真） | **已闭合**，这次用了不改状态机的修法：`runCheck` 把每次执行的结果写 `<dir>/.plando/last-check.json`（`{name, command, ok, exitCode, at}`），`plando_card action=done` 时对账——`kind='check'` 必须存在 `name === card.id && ok === true` 的记录，否则拒（理由分三种：从没跑过 / 是别的卡的检查 / 上次没通过）。**没有**往 `state.json` 加字段，所以不需要版本迁移和契约修订；`kind='files'` 不要求记录（改文件本来没有退出码） | `lib/checks.js`、`lib/cards.js`、`lib/tools.js` |
+| **N17**（成功消息 250 字） | **本轮不再追**。250 字里 120 字是尾部路径（`shortPath` 已经砍掉 3 层 ×120 字的情况），真正的问题是「一条成功消息本来就该短」——但契约的 160 字只约束错误消息，把它套到成功消息上会逼着把「下一步」也砍掉。记为观察项 | — |
+
+**§9.6 里那些「本案的取舍」写在这里，免得下一轮再提一遍**：
+
+- **`node evil.js` 仍放行**：这是 §9.6.4 记录的已知残余。串联分档并没有让它变强（单独写 `node evil.js` 一样放行）；要构成攻击，那个 `.js` 必须**已在用户项目里**——AI 写不出 `.js`（白名单只有 7 个配置文件），`plando_check` 也不能写文件。进 KNOWN-ISSUES。
+- **不做「值必须在项目内」的路径判定**：N19 的整类拒绝是**有意的保守**。将来若真有人需要 `--test-reporter-destination`，正确做法是「把路径限制在 `.plando/reports/` 下并由插件自己建」，而不是放开一个任意路径。
+- **`pip` 不在 `SCRIPT_COMMANDS` 里**：`pip install` 会跑 `setup.py`，它不该出现在 `scripts` 里；`plando_check` 那边 `pip install` 同样被 `RUN_SUBCOMMANDS` 拦着。
+
+## 12. §11 修完之后仍然开着的（复核记录，不是新判决）
+
+> 这一节是我对 **§11 那棵工作树**（`node --test` 373 / 0 红）的复核记录。**判决仍在 §6，仍是 fix-first。** §11 的处置我逐条验过，绝大多数对得上；下面只记**验不过去**或**§11 没提到**的。
+
+### 12.1 §11 的处置：验过的部分全部属实
+
+| §11 的说法 | 我的复核 | 结论 |
+|---|---|---|
+| `WRITE_FILE_FLAGS` 整类拒 9 个开关 | `probe-final65.mjs`：`--test-reporter-destination` / `--redirect-warnings` / `--diagnostic-dir` / `--report-directory` / `--report-filename` / `--heap-prof-dir` / `--cpu-prof-dir` / `--snapshot-blob` / `--disk-cache-dir` **9/9 全拒**；`npm test -- --test-reporter-destination=x` 这类转发形态也拒 | ✅ 属实 |
+| N19 端到端已失效 | `probe-final45.mjs`：`NOTES.md` 内容原样、`state.json` 仍是合法 JSON、项目仍可读；`probe-final50.mjs` 三种路径形态（绝对 / `../` / `../../`）全在 `declare` 阶段被拒 | ✅ 属实，**N19 闭合** |
+| 误杀 9/22 → 0 | `probe-final58.mjs` 十条常见 build 写法 **0/10 误杀**；`probe-final39.mjs` 的 23 条只剩 `npx next build` 一条 | ✅ 属实 |
+| `&&` 分档、每段独立校验 | `npm ci && node exploit.js` 拒且理由落在坏段；`rimraf dist && vite build` 放行；`node --test && bash -c "rm x"` 拒 | ✅ 属实 |
+| 友好壳有独立校验 | `cross-env NODE_OPTIONS=…` / `cross-env PATH=./evil` / `cross-env A="x y"` / `rimraf /etc` / `rimraf ../../x` 全拒，文案对得上 | ✅ 属实 |
+| M4 `kind:'check'` 对账 | 「跑了一下」/「everything works」/「跑了 vite build，退出码 0」在没跑过时全拒；真跑过且 exit 0 才过；跑失败也拒 | ✅ 属实 |
+
+### 12.2 仍然开着的四条（§11 没处置或只部分处置）
+
+#### R1　`npx` 的第三份白名单还在，而且方向反了　【中】
+
+`KNOWN_TOOLS`（11 项）和 `ALLOWED_COMMANDS`（已补到含 `next` / `webpack` / `rollup` / `esbuild` / `parcel` / `react-scripts` / `nodemon` / `pm2` / `tsx` / `ts-node` / `serve`）**又没同步**。实测（`probe-final65.mjs`）：
+
+```
+放行  npx vite build
+拒绝  npx next build   / npx webpack / npx rollup -c / npx esbuild / npx parcel build
+拒绝  npx react-scripts build / npx nodemon / npx pm2 / npx tsx / npx serve
+```
+
+而**去掉 `npx` 的同一条命令全部放行**。这和 §9.6.2 里 `vite build` 拒 / `npx vite build` 放是同一个病，只是方向反过来了：§11 补的是 `ALLOWED_COMMANDS`，忘了 `npx` 走的是**另一份** `KNOWN_TOOLS`。
+
+**修法**（一行）：`npx` 的判定改成「包名（去掉 `@version`）∈ `ALLOWED_COMMANDS` ∪ `KNOWN_TOOLS`」，再加一条断言「`npx X` 放行 ⟺ `X` ∈ 并集」。理由：`npx` 执行本地已装工具和现下载包的区别，`npx` 自己会先查 `node_modules/.bin`；按包名判断已经够，不需要两份名单。
+
+#### R2　`--env-file` / `--env-file-if-exists` 仍放行　【低-中】
+
+```
+放行  node --test --env-file=.env
+放行  node --test --env-file=C:\x\.env      ← 项目外
+放行  node --test --env-file-if-exists=.env
+```
+
+§11 收的是**写**文件的开关（`WRITE_FILE_FLAGS`），`--env-file` 是**读**，所以没被收进去。但它的值同样是「命令里指定的任意路径」，能把项目外的 `.env` 读进来；如果里面有 token，`node --test` 一打印就经 `plando_check` 的输出回到模型手里。**同一类问题的另一半**，建议一起收：要么整类拒，要么值必须落在 `dir` 内。
+
+#### R3　全卡 `downgrade` 仍能零产出到 `done`　【中，这是现在最实质的一条】
+
+`probe-final55.mjs`：唯一一张卡 `downgrade reason:'时间不够'` → `cards_done` → `ship_pass{offlineOk:true, selfChange:true, explain:'好了'}` → **`stage=done`**。项目里只有 `IDEA.md` + `TECH.md`，**没有 `checks.json`，没有一行用户代码**。
+
+§11 给 M4 加的对账只挂在 `action=done` 上，`downgrade` 这条路根本不经过它——**M4 的两个残余（`kind:'files'` 不验、全卡 downgrade 零产出）中，后者更值得修**：它不涉及安全，但直接决定「这个模式会不会让用户以为自己交付了东西」。
+
+**修法建议**：`cards_done` 时若「`status==='done'` 的卡 = 0」，① 拒绝推进，或 ② 要求 `ship_pass.explain` 说清「这一轮具体交付了什么」并落到 `HANDOFF.md`。另外 `downgrade.reason` 现在 `'x'` 和 `'我懂了'` 都能过，建议复用 `checkEvidenceObservable`。
+
+#### R4　`node evil.js` 仍放行　【低，已知残余】
+
+单独写、以及 `node --test && node evil.js` / `npm test && node evil.js` 这类串联都放行。§11 已经写明这是**有意的取舍**（那个 `.js` 必须已在用户项目里，AI 写不出 `.js`），我同意这个判断，只是把它记在这里，免得下轮又被当成新发现。
+
+### 12.3 一句话
+
+**§11 的修复全部属实，G2 与 N19 可以判闭合。**剩下的四条里，R1 是「第三份名单又漂移了一次」（修起来最便宜、最容易再犯），R3 是「模式可能让用户以为自己交付了东西」（最有产品意义）。R2 / R4 进 KNOWN-ISSUES 即可。**判决不变：fix-first。**

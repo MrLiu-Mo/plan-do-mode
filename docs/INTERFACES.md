@@ -77,10 +77,12 @@ export const TOOL_NAMES;   // ['plando_idea','plando_project','plando_status','p
 **统一的 `execute` 包装**（tools.js 内部一个函数，8 个工具都走它）：
 
 ```js
-async function run(args, body, deps) {
+async function run(args, body, deps, toolName) {
   // 1. 参数形状不对 -> 返回 plando 形状的错误文本，不抛
   // 2. body 抛错 -> catch 成 `plando：…——下一步：…` 文本返回（工具永远不把异常抛给模型）
-  // 3. 被拒的调用统一由 logRejection 追加到 .plando/log.jsonl（kind=reject, source=tool）
+  // 3. 被拒的调用统一由 logRejection 追加到 .plando/log.jsonl
+  //    记录形状：{ at, kind:'reject', source:'tool', tool, dir, reason }
+  //    dir 优先取这次调用自己带的，没有再退到守卫记的活跃项目；都没有就静默跳过
   //    日志写失败不影响返回值
   // 4. 返回 string
 }
