@@ -257,7 +257,40 @@ test('路径类参数不许指向项目外（§14 R6）', () => {
     'node --test test/a.test.js', 'node scripts/check-docs.mjs',
     'node --test --test-reporter=spec', 'cargo test', 'pytest -q',
     'node --env-file=.env --test',
+    // 归一化后仍在项目内的 `..` 写法：不是漏放，是**不该误杀**
+    'tsc -p src/../tsconfig.json',
+    'node --test src/../test/a.test.js',
+    'node --test ./test/', 'node --test test/sub/', 'node --test .',
+    'jest --coverageDirectory=./cov',
   ]) {
+    assert.equal(validateCommand(cmd), null, `不该误杀：${cmd} → ${validateCommand(cmd)}`);
+  }
+  // 但归一化后真的走到项目外的必须拒（否则「用 .. 抵消」就成了绕过办法）
+  for (const cmd of ['node --test src/../../test/a.js', 'node --test a/../../../x.js']) {
+    assert.ok(validateCommand(cmd), `归一化后越界必须拒：${cmd}`);
+  }
+});
+
+// REVIEW-tools §14 R5 的第二层：npx **自己的开关**也能改变它执行什么。
+// 用「`-` 开头就跳过」的宽松写法会漏掉这两个：
+//   - `--node-options="--require ./x.cjs"` 往目标进程注入模块
+//   - `-c "<整条命令>"` 让 npx 再套一层 shell
+//   - `-p` / `--package` 额外装一个包（包名跟要跑的命令无关，剥壳看不见它）
+test('npx 自己的开关不能改变它执行什么（§14 R5 第二层）', () => {
+  for (const cmd of [
+    'npx --package evil -- node --test',
+    'npx -p evil -- node --test',
+    'npx --package=evil node --test',
+    'npx --node-options="--require ./x.cjs" node --test',
+    'npx -c "node -e 1"',
+    'npx --shell=cmd node --test',
+  ]) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `必须拒绝：${cmd}`);
+    assert.match(bad, /npx/, `理由要提到 npx 的开关：${cmd} → ${bad}`);
+  }
+  // 无副作用的开关照常放行（默认拒、只放行明确无害的）
+  for (const cmd of ['npx -y vite build', 'npx --yes vite build', 'npx -q vitest run', 'npx -- node --test']) {
     assert.equal(validateCommand(cmd), null, `不该误杀：${cmd} → ${validateCommand(cmd)}`);
   }
 });

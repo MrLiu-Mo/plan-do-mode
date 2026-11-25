@@ -134,7 +134,7 @@ plugin_manager action=remove_bundle target=dsh-plan-do
 ## 6. 开发者自查（改完代码之后）
 
 ```bash
-node --test                     # 394 条，必须全绿
+node --test                     # 395 条，必须全绿
 node scripts/check-docs.mjs     # 文档与代码的交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 分发包冒烟：真打包 → 解开 → 真加载 → 跑一遍流程
