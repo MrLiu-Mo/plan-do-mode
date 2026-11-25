@@ -34,6 +34,7 @@ A:\AI\plan-do-mode\
 ├─ locale/en.json zh.json  # meta.title / meta.description（双语，市场索引要用）
 ├─ LICENSE                 # MIT
 ├─ scripts/verify-pack.mjs # 断言 npm pack 清单完整（零依赖）
+├─ scripts/check-docs.mjs  # 断言三份文档互相引用一致（阶段/事件/工具/§ 编号/链接）
 ├─ .github/workflows/test.yml # CI：node --test + verify-pack
 ├─ lib/
 │  ├─ index.js             # apply(ctx, config)：注册 8 个工具 + 守卫
@@ -50,9 +51,15 @@ A:\AI\plan-do-mode\
 │  └─ format.js            # plando_status 的文本渲染
 ├─ docs/PROTOCOL.md        # 人读流程：阶段/出口/判据/卡住协议
 ├─ docs/INSTALL.md         # 安装 + 冒烟验证清单
-├─ test/*.test.js          # 7 个测试文件
+├─ docs/CONTRACT.md        # state.js 契约：阶段/事件/payload/错误消息（实现者必读）
+├─ docs/API-FACTS.md       # DSH 插件 API 已验证事实（从 glim-mode 摘，防幻觉）
+├─ docs/DEV-PROMPTS.md     # 交给别的 AI 实现的逐轮提示词（R0–R7 + 验收卡 + 纠偏卡）
+├─ test/*.test.js          # 测试文件，按 R0–R7 逐轮累加（每轮新增的模块都带测试）
 └─ README.md
 ```
+
+**实施方式**：按 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md) 的 R0–R7 逐轮推进，每轮一 commit；
+实现细节以 [docs/CONTRACT.md](docs/CONTRACT.md) 为准，DSH API 用法以 [docs/API-FACTS.md](docs/API-FACTS.md) 为准。
 
 **硬约束：零依赖。** 只 import `node:` 内置模块和本目录文件。因此工具用裸 `ToolDefinition` 对象（`parameters` 用原始 JSON Schema，`output: { schema:{type:'string'}, render }`），配置手工校验。
 
