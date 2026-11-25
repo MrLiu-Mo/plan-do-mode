@@ -162,6 +162,24 @@ test('downgradeCard：必须带理由；写 downgrades 留痕；已收尾不能�
   assert.equal(downgradeCard(r.state, 'c1', '再来一次').ok, false);
 });
 
+// REVIEW-tools §12 R3：理由也要能核对。`'x'` / `'我懂了'` 写进 downgrades 等于没写，
+// 而注释 philosophy 上它和 evidence 是同一个病——所以复用同一套「可观察性」判断。
+test('downgradeCard：空话理由被拒，写清交付到哪一步才收', () => {
+  const s = doing();
+  for (const why of ['x', '我懂了', '完成了', '没问题']) {
+    const r = downgradeCard(s, 'c1', why);
+    assert.equal(r.ok, false, `空话理由应被拒：${why}`);
+    assert.match(r.reason, /不算理由|实际交付/);
+  }
+  // 说清「降到哪」的照常通过
+  const ok = downgradeCard(s, 'c1', '只跑通 demo，保存功能没做');
+  assert.equal(ok.ok, true, ok.reason);
+  assert.equal(ok.state.downgrades[0].reason, '只跑通 demo，保存功能没做');
+  // 拒绝时原 state 不变
+  assert.equal(s.cards[0].status, 'doing');
+  assert.equal(s.downgrades, undefined);
+});
+
 test('setLearn / setDo：写 note 与 files，空值被拒', () => {
   const base = stateWith([card('c1', 'doing')]);
   const l = setLearn(base, 'c1', '学会了 fetch 的错误处理');

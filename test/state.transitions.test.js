@@ -213,6 +213,35 @@ test('reopen：reason 为空被拒', () => {
   assert.match(r.reason, /下一步/);
 });
 
+// REVIEW-tools §12 R3：全卡降级 ≠ 做完了。原来这条路能一路走到 done，
+// 项目里只有 IDEA.md + TECH.md、没有 checks.json、没有一行用户代码。
+test('cards_done：一张卡都没真收尾时不许推进（全部降级不等于做完）', () => {
+  const allDown = makeState({
+    stage: 'build',
+    cards: [
+      { id: 'c1', techIds: ['t1'], title: '开窗口', status: 'downgraded' },
+      { id: 'c2', techIds: ['t1'], title: '存数据', status: 'downgraded' },
+    ],
+  });
+  const blocked = applyEvent(allDown, 'cards_done', {});
+  assert.equal(blocked.ok, false, '全卡降级不该能推进到 ship');
+  assert.match(blocked.reason, /全部降级/);
+  assert.match(blocked.reason, /done|drop/, '要给出可行的下一步');
+  assert.equal(allDown.stage, 'build', '被拒时原 state 不变');
+
+  // 只要有一张真 done，其余降级 → 允许（这是正常的「小步跑通 + 砍范围」）
+  const mixed = makeState({
+    stage: 'build',
+    cards: [
+      { id: 'c1', techIds: ['t1'], title: '开窗口', status: 'done' },
+      { id: 'c2', techIds: ['t1'], title: '存数据', status: 'downgraded' },
+    ],
+  });
+  const ok = applyEvent(mixed, 'cards_done', {});
+  assert.equal(ok.ok, true, ok.reason);
+  assert.equal(ok.state.stage, 'ship');
+});
+
 test('revise：受影响卡标 stale 并给出 invalidateCards 提示', () => {
   const r = applyEvent(
     makeState({

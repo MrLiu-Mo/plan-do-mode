@@ -82,7 +82,7 @@ export function createInitialState(project);                 // -> state
 | `choose_build` | decide | build | `cards[]` | 卡片覆盖所有 TECH 项；`size=large` 且未做过验证 → 拒绝 |
 | `choose_handoff` | decide | handoff | — | — |
 | `verify_result` | verify | decide | `result, evidence` | `result ∈ {pass, fail, inconclusive}`；`evidence` 非空 |
-| `cards_done` | build | ship | — | 所有卡 `status ∈ {done, downgraded}`，无 `todo/doing/stale` |
+| `cards_done` | build | ship | — | 所有卡 `status ∈ {done, downgraded}`，无 `todo/doing/stale`；**且至少一张是 `done`**（全卡降级 = 什么都没跑通，不是「小步跑通」） |
 | `ship_pass` | ship | done | `offlineOk, selfChange, explain` | 三项都为真/非空 |
 | `drop` | 任意非终态 | dropped | `reason` | `reason ∈ {falsified, parked}`；实际不会有 `inbox` 项目，见 §1 备注 |
 | `revise` | idea / tech / decide / build | tech | `reason` | 非空；受影响卡标 `stale`；重渲染 IDEA.md |
@@ -235,6 +235,10 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 `kind='check'` 必须存在 `lastCheck.name === card.id && lastCheck.ok === true` 的记录，否则拒；
 `kind='files'` 不要求（改文件本来没有退出码）。纯函数 `doneCard(state, id, evidence, options)`
 只在 `options` 里**有这个键**时才强制，`tools.js` 每次都会传，所以插件运行时对账一定生效。
+
+**降级理由也要能核对**：`downgrade` 复用 `checkEvidenceObservable`（和 evidence 同一套判断），
+`'x'` / `'我懂了'` / `'完成了'` 这类空话一律拒——「降级」是留给「范围砍小但仍交付了一部分」的出口，
+不是「跳过这一张」的快捷方式。全卡都降级时 `cards_done` 会拒（见 §2 事件表）。
 
 **id 字符集（硬约束）**：`cards[].id` 与 `tech.items[].id` 必须匹配 `^[A-Za-z0-9_-]{1,40}$`。
 原因不是洁癖：卡 id 会被当成文件名渲染成 `.plando/cards/<id>.md`，而 `../../README` 这种 id

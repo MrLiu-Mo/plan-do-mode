@@ -299,6 +299,29 @@ test('plando_card 收尾必须有证据；无证据的 done 被拒且不落盘',
   assert.equal(after.cards[0].status, 'done');
 });
 
+// REVIEW-tools §12 R3：全卡降级曾经能零产出到 done——项目里只有 IDEA.md + TECH.md，
+// 没有 checks.json、没有一行用户代码，而 ship_pass 只要三句套话就过。
+test('端到端：全卡降级无法推进到 ship（§12 R3）', async (t) => {
+  const { registered, config } = registerAll(t);
+  const { dir, call } = await pushToBuild(registered, config);
+
+  await call('plando_card', { action: 'start', dir, id: 'c1' });
+  // 空话理由也不收（和 evidence 同一套判断）
+  const vague = await call('plando_card', { action: 'downgrade', dir, id: 'c1', reason: '我懂了' });
+  assert.match(vague, /不算理由|实际交付|plando：/);
+
+  const down = await call('plando_card', { action: 'downgrade', dir, id: 'c1', reason: '只跑通 demo，保存功能没做' });
+  assert.match(down, /降级/);
+
+  const blocked = await call('plando_transition', { dir, event: 'cards_done' });
+  assert.match(blocked, /全部降级/, `全卡降级不该放行：${blocked}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.plando', 'state.json'), 'utf8')).stage, 'build');
+
+  // 确实做不了 → drop 是合法出口，不是死路
+  const dropped = await call('plando_transition', { dir, event: 'drop', payload: { reason: 'falsified' } });
+  assert.match(dropped, /drop|放弃/);
+});
+
 test('错误文本不叠两层：下层已是完整形状时原样透传（回归）', async (t) => {
   const { registered, config } = registerAll(t);
   const { dir, call } = await pushToBuild(registered, config);

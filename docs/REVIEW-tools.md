@@ -1792,3 +1792,28 @@ node $env:TEMP\plando-review\check-tables.mjs    # 报告自身的表格列数�
 ### 12.3 一句话
 
 **§11 的修复全部属实，G2 与 N19 可以判闭合。**剩下的四条里，R1 是「第三份名单又漂移了一次」（修起来最便宜、最容易再犯），R3 是「模式可能让用户以为自己交付了东西」（最有产品意义）。R2 / R4 进 KNOWN-ISSUES 即可。**判决不变：fix-first。**
+
+---
+
+## 13. §12 的处置记录（Lead 收到第三轮复核后同一轮内完成）
+
+§12 的结论是「§11 的声明全部属实，N19 真闭合、误杀 9/22 → 0/10」，但留下四条残余。
+下面是逐条处置。**§12 一字未改。**
+
+`node --test` **378 passed / 0 failed**；`check-docs` / `verify-pack` / `smoke-pack` 全过。
+
+| # | 处置 | 落在哪 |
+|---|---|---|
+| **R1**（中，`npx` 的第三份白名单又漂移，方向还反了） | **已闭合**。`npx` 的判据从「包名 ∈ `KNOWN_TOOLS`」改成「包名 ∈ `KNOWN_TOOLS` ∪ `ALLOWED_COMMANDS`」，并加等价断言：对 16 个工具逐个验「裸命令放行 ⟹ `npx <它>` 也放行」。`npx` 自己会先查 `node_modules/.bin`，按包名判断就够，不需要第三份名单——这正是 §9.6.2 那个病的镜像（`vite build` 拒 / `npx vite build` 放），不修的话模型学到的是「加 `npx` 就能过」 | `lib/checks.js`、`test/checks.test.js` |
+| **R3**（中，全卡降级零产出到 done） | **已闭合，两处**。① `cards_done` 要求「至少一张 `done`」，全降级直接拒（理由写明「N 张卡全部降级了，一行都没跑通」+ 下一步「至少把一张做到 done，其余再降级；确实做不了就传 drop」）；② `downgradeCard` 的理由复用 `checkEvidenceObservable`，`'x'` / `'我懂了'` / `'完成了'` 一律拒——「降级」这个出口原本对理由完全不设防，等于「跳过这一张」的快捷方式 | `lib/state.js`、`lib/cards.js`、`test/state.transitions.test.js`、`test/cards.test.js`、`test/tools.test.js` |
+| **R2**（中，`--env-file` 能读项目外文件） | **已闭合，用另一套规则**。它和 N19 方向相反（读不是写）但有合法用法（`node --env-file=.env --test` 是标准姿势），所以**不做整类拒绝**——整类拒会把最常见的写法误杀（§9.6.2 的教训）。规则改成「值必须是项目内的相对路径」：绝对路径、盘符、`..` 一律拒；分离形式（`--env-file .env`）拿不到上下文时一律当不安全 | `lib/checks.js`、`test/checks.test.js` |
+| **R4**（`node evil.js` 与它的串联） | **不修，维持 §11 的取舍**。串联分档并没有让它变强（单独写一样放行）；要构成攻击，那个 `.js` 必须**已在用户项目里**——AI 写不出 `.js`（`scaffold` 白名单只有 7 个配置文件），`plando_check` 也不能写文件。进 KNOWN-ISSUES | — |
+
+**这轮学到的、值得写进下一轮 prompt 的一条**：同一个概念出现第三份名单（`ALLOWED_COMMANDS` / `SCRIPT_COMMANDS` / `KNOWN_TOOLS`）时，漂移几乎是必然的，而且方向经常反。修法不是「记得同步」，而是**加一条等价断言**——名单一改成不一致就红。现在已经有两处：`SCRIPT_COMMANDS ⊆ ALLOWED_COMMANDS`、`npx X 放行 ⟺ X ∈ ALLOWED_COMMANDS ∪ KNOWN_TOOLS`。
+
+**KNOWN-ISSUES（0.1.0 不修，都已验过不是「本轮引入」）**：
+
+- `node evil.js` 及其串联（R4，理由见上）。
+- `--watch` / `--inspect-brk` 会让检查挂满 60 秒超时（有超时兜底，不是安全问题）。
+- `deno run x.ts` / `bun run x.ts` 放行：这两个解释器的核心用法就是执行文件，argv 上无法与「跑检查」区分。
+- 三处 `minutes` 计算仍是独立实现（口径已统一，没抽公共函数）。

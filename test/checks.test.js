@@ -115,6 +115,34 @@ test('validateCommand：拒绝「写文件」类开关（N19 任意文件写）'
   assert.equal(validateCommand('node --test --test-reporter=spec'), null);
 });
 
+// REVIEW-tools §12 R2：`--env-file` 是**读**文件，方向和 N19 反着来，
+// 但 `--env-file=C:\Users\me\.env` 照样能把项目外的密钥读进来、经 stdout 回到模型手里。
+// 有合法用法（`node --env-file=.env --test` 就是标准姿势），所以不做整类拒绝，
+// 只要求「值必须是项目内的相对路径」。
+test('validateCommand：--env-file 只许项目内相对路径（§12 R2）', () => {
+  for (const cmd of [
+    'node --env-file=.env --test',
+    'node --env-file=.env.test --test test/a.test.js',
+    'node --env-file=./config/.env --test',
+    'node --env-file-if-exists=.env --test',
+  ]) {
+    assert.equal(validateCommand(cmd), null, `应放行：${cmd}`);
+  }
+  for (const cmd of [
+    'node --env-file=../.env --test',
+    'node --env-file=../../secrets.env --test',
+    'node --env-file=C:\\Users\\me\\.env --test',
+    'node --env-file=/etc/secrets --test',
+    'node --env-file-if-exists=../../.env --test',
+    // 分离形式：值在下一个 token 里，这里拿不到上下文，一律当不安全
+    'node --env-file .env --test',
+  ]) {
+    const bad = validateCommand(cmd);
+    assert.ok(bad, `必须拒绝：${cmd}`);
+    assert.match(bad, /项目内|相对路径/, `理由要说明限制：${cmd} → ${bad}`);
+  }
+});
+
 test('validateCommand：包管理器只许跑脚本，不许安装 / 执行任意包', () => {
   for (const cmd of [
     'npm install', 'npm i', 'npm ci', 'npm add left-pad',
@@ -127,6 +155,27 @@ test('validateCommand：包管理器只许跑脚本，不许安装 / 执行任�
   // 正常跑测试 / 本地已装工具要放行。
   for (const cmd of ['npm test', 'npm run build', 'pnpm vitest run', 'npx tsc --noEmit', 'yarn test']) {
     assert.equal(validateCommand(cmd), null, `必须放行：${cmd}`);
+  }
+});
+
+// REVIEW-tools §12 R1：`npx` 原来走的是第三份名单（KNOWN_TOOLS），没跟着 ALLOWED_COMMANDS 扩，
+// 于是 `npx vite build` 放行、`npx next build` 拒，而同一条命令去掉 `npx` 又放行——
+// 「加不加 npx 结论不同」等于把白名单教成一道可试错的谜题。
+test('npx 与裸命令名同口径：ALLOWED_COMMANDS 里有的，加 npx 也该放行（§12 R1）', () => {
+  const same = [
+    'vite build', 'next build', 'webpack', 'rollup -c', 'esbuild --bundle',
+    'parcel build', 'react-scripts build', 'nodemon x.js', 'pm2 start', 'tsx src/x.ts',
+    'serve dist', 'tsc --noEmit', 'vitest run', 'jest', 'eslint .', 'prettier --check .',
+  ];
+  for (const bare of same) {
+    const plain = validateCommand(bare);
+    const viaNpx = validateCommand(`npx ${bare}`);
+    assert.equal(plain, null, `裸命令应放行：${bare}`);
+    assert.equal(viaNpx, null, `加 npx 不该反而被拒：npx ${bare} → ${viaNpx}`);
+  }
+  // 但 `npx <未知包>` 永远拒（npx 会先下载再执行）。
+  for (const cmd of ['npx evil-pkg', 'npx create-evil', 'npx @scope/evil', 'npx left-pad', 'npx some-pkg@latest']) {
+    assert.ok(validateCommand(cmd), `未知包必须拒：${cmd}`);
   }
 });
 
