@@ -122,8 +122,8 @@ plugin_manager action=remove_bundle
 | [docs/CONTRACT.md](docs/CONTRACT.md) | `state.js` 契约：阶段 / 事件 / payload / 错误消息 |
 | [docs/API-FACTS.md](docs/API-FACTS.md) | DSH 插件 API 的已验证事实（零依赖的由来） |
 | [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md) | 逐轮开发任务卡与验收命令 |
-| `docs/PROTOCOL.md` | 人读流程：阶段、出口判据、卡住协议（待补） |
-| `docs/INSTALL.md` | 安装与冒烟验证清单（待补；本文的「安装」节已覆盖三条装法） |
+| `docs/PROTOCOL.md` | 人读流程：11 阶段出口判据、三问、卡住时的三档升级 |
+| [docs/INSTALL.md](docs/INSTALL.md) | 安装、冒烟验证清单、卸载 |
 
 ## 开发
 
