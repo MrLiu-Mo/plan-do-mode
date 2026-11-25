@@ -29,7 +29,8 @@
     "icon.svg",
     "README.md",
     "LICENSE",
-    "docs"
+    "docs",
+    "!docs/REVIEW-*.md"
   ],
   "scripts": {
     "test": "node --test",

@@ -64,6 +64,21 @@ test('混进 test/ 失败', () => {
   assert.ok(result.problems.some((p) => p.includes('test/state.test.js')), result.problems.join('\n'));
 });
 
+test('内部审查报告不该进分发包（docs/REVIEW-*.md 有 150 KB 且行号会过期）', (t) => {
+  // 仓库里确实有这类文件，否则这条测试是空转的。
+  assert.ok(expected.excludedDocs.length > 0, '仓库里应有 docs/REVIEW-*.md');
+  for (const file of expected.excludedDocs) {
+    assert.match(file, /^docs\/REVIEW-.+\.md$/);
+    // 它们不能同时出现在 requiredFiles 里——两处规则打架会让 verify-pack 自相矛盾。
+    assert.equal(expected.requiredFiles.includes(file), false, `${file} 不该在 requiredFiles 里`);
+  }
+
+  const leaked = checkPackList([...goodList(), expected.excludedDocs[0]], expected);
+  assert.equal(leaked.ok, false, '包里混进 REVIEW 报告必须报错');
+  assert.ok(leaked.problems.some((p) => p.includes('不该被打包')), leaked.problems.join('\n'));
+  assert.ok(leaked.problems.some((p) => p.includes('!docs/REVIEW-*.md')), '报错要指出修法：' + leaked.problems.join('\n'));
+});
+
 test('混进 scripts/ 失败', () => {
   const result = checkPackList([...goodList(), 'scripts/check-docs.mjs'], expected);
   assert.equal(result.ok, false);

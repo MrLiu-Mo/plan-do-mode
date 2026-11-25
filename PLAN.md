@@ -261,7 +261,9 @@ plugin_manager action=install_bundle target=A:\AI\plan-do-mode
 ### 10.2 包元数据（照 `dsh-preset-deep` / `dsh-team-control` 的既有惯例）
 
 - `"type": "module"`；`exports` 暴露 `.` / `./cordis.patch.yml` / `./locale/*.json` / `./icon` / `./package.json`
-- `"files"` 白名单：`lib/`、`cordis.patch.yml`、`locale/*.json`、`icon.svg`、`README.md`、`LICENSE`、`docs/`
+- `"files"` 白名单：`lib/`、`cordis.patch.yml`、`locale/*.json`、`icon.svg`、`README.md`、`LICENSE`、`docs/`，再减 `!docs/REVIEW-*.md`
+  （两份内部红队报告共约 150 KB，行号指向某个 commit、装包用户用不上；**留仓库、不进包**，
+  `scripts/verify-pack.mjs` 会断言它们没被误打包）
 - `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`
 - `keywords: ["dsh-plugin","dsh-bundle","deepseek-harness","agent-preset"]`（索引靠它发现）
 - `license: "MIT"` + `repository` / `homepage` / `bugs` / `icon`
@@ -269,7 +271,7 @@ plugin_manager action=install_bundle target=A:\AI\plan-do-mode
 
 ### 10.3 零依赖保护不了的事：打包漏文件
 
-`files` 白名单漏一项（例如 `locale/zh.json`），本地 link 安装一切正常，别人装完却是空标题——这是分发特有的失败模式。所以 `scripts/verify-pack.mjs` 跑 `npm pack --dry-run --json`，断言清单包含 `lib/` 下每个模块、`cordis.patch.yml`、两个 locale、`icon.svg`，缺一个即失败（对应 A8）。
+`files` 白名单漏一项（例如 `locale/zh.json`），本地 link 安装一切正常，别人装完却是空标题——这是分发特有的失败模式。所以 `scripts/verify-pack.mjs` 跑 `npm pack --dry-run --json`，断言清单包含 `lib/` 下每个模块、`cordis.patch.yml`、两个 locale、`icon.svg`，缺一个即失败（对应 A8）。反向也要断言：`test/`、`scripts/`、`REVIEW-*.md` 这些**不该**跟包走的东西一旦混进去同样失败——「多打包」比「少打包」更不容易被用户发现。
 
 ### 10.4 与市场索引的关系（上架是后置项，但形态要提前对齐）
 

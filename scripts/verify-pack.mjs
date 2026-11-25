@@ -20,6 +20,16 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
+ * 跟着包走的文档 / 不跟着包走的文档。
+ *
+ * `docs/REVIEW-*.md` 是内部红队报告（约 150 KB）：它们证明过质量，但对装包的用户是噪音，
+ * 而且行号指向某个 commit、随时会过期。所以**留在仓库、不进 npm 包**——
+ * `package.json` 的 `files` 里用 `!docs/REVIEW-*.md` 排除，这里用同一个规则算「应该有什么」。
+ * 两处规则必须一致，否则 verify-pack 会误报缺文件。
+ */
+const NOT_SHIPPED_DOC = /^REVIEW-.*\.md$/;
+
+/**
  * 从仓库现状收集「包里必须有的东西」。
  * lib/ 与 docs/ 是现读目录，不是写死的清单——新增模块忘了进白名单时能抓到。
  */
@@ -33,11 +43,15 @@ export function collectExpected(root = ROOT) {
       .sort();
   };
   const libFiles = list('lib').filter((name) => name.endsWith('.js')).map((name) => `lib/${name}`);
-  const docFiles = list('docs').filter((name) => name.endsWith('.md')).map((name) => `docs/${name}`);
+  const allDocs = list('docs').filter((name) => name.endsWith('.md'));
+  const docFiles = allDocs.filter((name) => !NOT_SHIPPED_DOC.test(name)).map((name) => `docs/${name}`);
+  const excludedDocs = allDocs.filter((name) => NOT_SHIPPED_DOC.test(name)).map((name) => `docs/${name}`);
 
   return {
     // 单独一组，少任何一个都要报「新增模块漏进 files 白名单」
     libFiles,
+    docFiles,
+    excludedDocs,
     requiredFiles: [
       'package.json',
       'cordis.patch.yml',
@@ -69,6 +83,9 @@ export function checkPackList(fileList, expected) {
   }
   for (const file of expected.requiredFiles || []) {
     if (!has.has(file)) problems.push(`缺少文件：${file}`);
+  }
+  for (const file of expected.excludedDocs || []) {
+    if (has.has(file)) problems.push(`不该被打包：${file}（内部审查报告不进分发包，files 里要有 !docs/REVIEW-*.md）`);
   }
   for (const prefix of expected.forbiddenPrefixes || []) {
     for (const file of has) {
@@ -158,9 +175,10 @@ function main() {
   }
 
   const sizeKb = Math.round(pack.size / 1024);
+  const excluded = expected.excludedDocs.length ? `，另有 ${expected.excludedDocs.length} 份内部报告不进包` : '';
   console.log(
     `pack ok: ${fileList.length} files, ${expected.libFiles.length} modules, `
-    + `${expected.requiredFiles.length} required, ${sizeKb} kB (${pack.filename})`,
+    + `${expected.requiredFiles.length} required, ${sizeKb} kB (${pack.filename})${excluded}`,
   );
 }
 
