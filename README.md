@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 开发中，功能已齐、文档收尾。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 397 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
+**v0.1.0 开发中，功能已齐、文档收尾。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 404 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
 
 ## 安装
 
@@ -115,15 +115,14 @@ plugin_manager action=remove_bundle
 
 ### 已知残余（0.1.0 不修，明说而不是假装拦住了）
 
-内部审计（`docs/REVIEW-tools.md`，不进分发包）对着命令白名单做过四轮对抗测试，下面这些是**放行了但目前打不通副作用**的，或者「拦不住、但不构成实际风险」的：
+内部审计（`docs/REVIEW-tools.md`，不进分发包）对着命令白名单做过五轮对抗测试，下面这些是**放行了但目前打不通副作用**的，或者「拦不住、但不构成实际风险」的：
 
 - **`node evil.js` 及串联写法放行**（`npm test && node evil.js` 也是）。要构成攻击，那个 `.js` 得先在项目里——本插件写不出 `.js`（`plando_scaffold` 只写 7 个声明式配置文件，且 `.js` 直接拒）。换句话说，这要求**项目里本来就有**那个文件，或者用户自己写进去。
 - **`deno run x.ts` / `bun run x.ts` 放行**。这两个解释器的核心用法就是执行一个文件，argv 上无法与「跑检查」区分；白名单里保留它们是因为 `deno test` / `bun test` 常用。
-- **`--watch` / `--inspect-brk` 会挂满 60 秒超时**，超时后按失败处理（不会放行）。
-- **`C:evil.js`（盘符相对路径）判不出来**。需要项目不在 C: 盘、且攻击者知道 C: 上的当前目录，实际不可利用。
+- **`--watch` / `--inspect-brk` 会挂满 60 秒超时**，超时后按失败处理（不会放行）。裸写 `npx <工具>`（如 `npx vitest`）也属于这一类——它可能进交互式 watch，同样只会超时失败。
 - 另有若干「白名单内工具 + 无意义/不存在开关」的组合会放行，到工具那一步自己报错，不产生副作用。
 
-`plando_check` 的执行结果会写 `.plando/last-check.json`，`plando_card done` 拿它和证据对账；文件类证据要和项目里真实存在的文件对账。所以「自称跑过了」不算证据。
+`plando_check` 的执行结果会写 `.plando/last-check.json`，`plando_card done` 拿它和证据对账；文件类证据要和项目里真实存在的文件对账。**而且项目里必须至少有一个你自己写出来的文件**——模式产物（`IDEA.md` 等）与插件能写的配置文件（`package.json` 等）不算，因为那两类都可能是插件/AI 自己造的。所以「自称跑过了」和「拿配置文件凑数」都不算证据。
 
 ## 文档
 

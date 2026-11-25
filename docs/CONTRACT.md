@@ -229,14 +229,19 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 半写文件比报错更糟。
 
 **证据要对账**：`evidence.summary` 是**自述**，「跑了 npm test，退出码 0」这句话
-在从没跑过的时候一样写得出来。所以 `plando_card action=done` 时对两类证据分别核对：
+在从没跑过的时候一样写得出来。所以 `plando_card action=done` 时对三类证据分别核对：
 
+- **前置闸（所有证据都过）**：项目里必须**至少有一个用户自己的产出**。
+  `node --test` 在一个测试文件都没有的项目里退出码是 **0**，这条闸专治
+  「declare → run → done 三步收掉一张卡而一个字都没写」。
+  「用户自己的产出」= 项目里的普通文件，**排除**模式产物（`IDEA.md` / `TECH.md` / …）
+  与脚手架能写的 7 个配置文件（`package.json` 等）——那两类都可能是插件/AI 自己造的，
+  拿它们当「我干完了」的证据是自我认证。
 - `kind='check'`：每次 `plando_check` 的结果记在 `<projectDir>/.plando/last-check.json`
   （`{ name, command, ok, exitCode, at }`，**不进** `state.json`：它属于运行记录，不是状态机数据，
   不参与版本迁移），必须存在 `lastCheck.name === card.id && lastCheck.ok === true` 的记录，否则拒。
-- `kind='files'`：证据（或卡片的 `do.files`）里点名的文件必须**真的在项目里**
-  （工具层扫用户代码区后注入清单）。点不出真实文件名就拒——否则
-  「1 张 done + 全降级」能零产出走到 `done`（REVIEW-tools §14 R7）。
+- `kind='files'`：证据（或卡片的 `do.files`）里点名的文件必须**真的在**上面那份用户产出清单里。
+  点不出真实文件名就拒。
 
 纯函数 `doneCard(state, id, evidence, options)` 只在 `options` 里**有那个键**时才强制
 （`lastCheck` / `projectFiles`），`tools.js` 每次都会传，所以插件运行时对账一定生效。

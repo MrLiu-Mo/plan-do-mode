@@ -2220,3 +2220,571 @@ WRITE_FILE_FLAGS 9/9 全拒 = true
 - `--watch` / `--inspect-brk` 挂满 60 秒超时。
 - `deno run x.ts` / `bun run x.ts` 放行 —— 这两个解释器的核心用法就是执行文件，argv 上无法与「跑检查」区分。
 - 三处 `minutes` 计算独立实现（口径已统一）。
+
+## 16. §15 处置的复核：R5 / R6 / R8 是真闭合，R7 只部分闭合，而「产出为零也能到 done」还开着三条路（R10 / R12 / R13）
+
+§15 的结论是：R5（`npx` 洗白）、R6（路径类参数）、R8（包别名）已闭合，R7-a / R7-b 已闭合，R3 随 R7-a 闭合。
+**其中 R5、R6、R8 这三条我复核后同意；R7-a、R7-b 只是部分闭合；R3 不但没闭合，还多出了两条新路。** 下面是实测。**§10–§15 一字未改。**
+
+复核基线 `a083fc5`。`git diff da1849f..HEAD -- lib` **为空**——`lib/checks.js` 的 blob 哈希在 `da1849f` 与 `HEAD` 两边都是 `9dbc8935`，
+所以「我测的代码」与「§15 处置的代码」是同一份，不存在版本错位。`node --test` 现在 **397 passed / 0 failed**。
+
+**我没有改 `lib/` 与 `test/`，也没有提交**（`git status --porcelain` 为空）。下面所有实测都是 `node %TEMP%\plando-review\<脚本>.mjs` 跑出来的临时脚本，不进仓库。
+
+### 16.0 先说清层，免得数字对不上
+
+上一轮我犯过一个错：拿纯函数的结论去冒充端到端。这轮每个结论都在**两层**各测一遍，数字分开给：
+
+| 层 | 怎么起 | 只有这层才有的东西 |
+|---|---|---|
+| **纯函数层** | 直接 `import` `lib/checks.js` / `lib/cards.js` / `lib/scaffold.js`，喂字符串 | 无 |
+| **工具层** | 用 `lib/tools.js` 的 `registerTools` 起一整套真工具（`state` / `project` / `artifacts` / `cards` / `checks` / `scaffold` / `git` / `policy` / `format` 全注入），然后 `plando_project → plando_transition ×4 → plando_card → plando_check → plando_transition` | `projectFiles`（R7-a 靠它）、`last-check.json`（M4 靠它）、`stage` 真值 |
+
+### 16.1 逐项判决
+
+| # | 项 | 上轮 | 这轮实测 | 判决 |
+|---|---|---|---|---|
+| **R5** | `npx` = 通用洗白前缀 | 高 | **624 组**矩阵（39 工具 × 16 危险形态）**洗白 0 / 反向漂移 0**；Lead 报的三条全拒；合法 npx 写法 **0/13 误杀**；G2 端到端链**到不了 done** | **闭合** |
+| **R8** | `npx vitest@npm:cowsay` 包别名 | 中 | `@npm:` / `@file:` / `@github:` / 裸 `@` 全拒；`@9` / `@9.1.2` / `@latest` / `@^9` 照常放行 | **闭合** |
+| **R6** | 20 类路径类参数 | 中 | 合法写法 **0/23 误杀**；越界写法（绝对 / UNC / `..`）**0/20 漏** | **闭合**（残余 R9） |
+| **R7-a** | `kind:'files'` 零文件系统访问 | 中 | 「凭空点一个不存在的文件」真堵上了（`projectFiles=[]` 时 fail-closed，方向对）；但**换一个真实存在的文件就能过** | **部分闭合**（残余 R10） |
+| **R7-b** | 降级理由判别力 ≈「≥4 字」 | 中 | 在我 §14 的 48 条样本上误放 **28/36 → 0/36**（与 Lead 数字一致）；但误杀 **1/12 = 8%**，更口语的纯中文 9 条里误杀 **3/9 = 33%**；且「空话 + 一个数字」**10/10 全过** | **部分闭合**（残余 R11） |
+| **R3** | 「1 done + N 降级」 | 中 | 那条短路确实收紧了，但**同一个终点换了一条更短的路**：0 个测试文件也能让「检查通过」 | **未闭合** — 新记 **R12** |
+| **R3 同族** | — | — | `npm test -- <参数>` 是**第二条洗白前缀**；`npx` 修好之后这一类**原样复活** | **新记 R13（高）** |
+
+**一句话**：结构性修法（剥壳 / 按形状判 / 拿真实文件对账）确实赢下了两个真闭合（R5、R6，都是 0 洗白 0 误杀）；剩下的问题主要不在命令层，而在**「证据与判定」层（`cards.js` + 工具层接线）**，外加命令层里 R5 的一个同胞兄弟（R13）。
+
+### 16.2 R5 是**真闭合**，不是「调严了而已」
+
+§15 报「105 组同拒、0 组洗白」。我用自己的矩阵重测，结论同向、数字更硬：
+
+- **624 组矩阵**（39 个白名单工具 × 16 种危险参数形态）：裸命令放行 **415** 组、`npx <工具> <危险参数>` 放行 **415** 组、两边同拒 **209** 组、**「npx 版比裸命令松」= 0 组**、反向（npx 版更严）= 0 组。
+- 抽 6 个工具 × 8 种危险形态 = 48 组再测一遍：**漂移 0 组**。
+- **Lead 报过的三条洞逐条实测都是拒**：`npx --node-options="--require ./x.cjs" node --test`、`npx -c "node -e 1"`、`npx --package evil -- node --test`。
+- **更深的向量也全拒**：`npx node -r ./x.cjs --test`、`npx node --import=./x.mjs --test`、`npx node --loader ./x.mjs --test`、`npx node --test --test-reporter=./evil.mjs`、`npx python -c "1"`、`npx python -m pip install x`、`npx python -m http.server`、`npx npm exec`、`npx pnpm dlx`、`npx yarn dlx`、`npx npm install`、`npx cargo run`、`npx go run x.go`、`npx java -jar x.jar`、`npx deno eval`、`npx tsx -e`、`npx --env-file=../e`、`npx --outDir ../x`、`npx --test ../x.js`、`npx npx npx npx …`（第 4 层拒）。
+- **合法写法 0/13 误杀**：`npx vite build`、`npx vitest run`、`npx tsc -b`、`npx eslint .`、`npx prettier --check .`、`npx --yes vite build`、`npx -y vite build`、`npx --no-install vite build`、`npx -q vite build`、`npx vitest@9 run`、`npx -- vite build`、`npx tsx script.ts`、`npx nodemon server.js`。
+- **`@` 之后只许版本号**成立：`@9` / `@9.1.2` / `@latest` / `@^9` 放；`@npm:` / `@file:` / `@github:` / 光秃秃的 `@` 拒。
+- **层数上限 3**：`npx npx npx node --test` 放，第 4 层拒。
+- **`--` 语义对**：`npx -- node -e "1"` 拒（剥掉 `--` 后剩 `node -e "1"`，照旧拒），`npx -- node --test` 放。
+- **大小写与扩展名**：`NPX` / `npx.exe` / `npx.cmd` 剥壳行为一致。
+- **G2 那条链现在是断的**：脚手架写 `scripts.test = npx tsx -e "…"` 被拒（理由「命令里的「-e」会让检查变成执行任意代码」），`package.json` **不落盘**；退一步走 `plando_card declare` + `plando_check run`（`npm test`）以非 0 退出，`AUTORUN-FULL.txt` **不生成**。
+
+**为什么这次的「修好」可信**：§15 的修法是**剥壳重判**——剥掉 `npx` 自己的包装，剩下的 argv 当一条独立命令再过同一套闸门。
+这在结构上保证「`npx` 后面能写什么」恒等于「裸命令能写什么」，洗白在数学上不可能，而不是「这轮想不到的写法还没试到」。624 组 0 洗白是这条结构性质的抽样确认。
+
+### 16.3 R6 是**真闭合**，但盘符相对路径这一支还漏（R9）
+
+- **合法写法 0/23 误杀**：`--outDir=dist`、`--outDir ./dist`、`node --test ./test/`、`src/../src/app.js`、`tsc -p ./tsconfig.json`、`go test ./...`、`--test-name-pattern=a:b`、`--test-name-pattern=foo/bar`、`.\x`、`-X pycache_prefix=.pycache`、`node --test test/*.test.js`、`vitest run src/`、`jest --testPathPattern=src`、`--env-file=.env` 等。
+  其中 `src/../src/app.js` 与 `--outDir ./dist` 是**必须不被误杀**的两条（前者归一化后仍在项目内，后者是 vite 标准写法），实测都放行。
+- **越界写法 0/20 漏**：`../x.js`、`sub/../../x.js`、`a/../../../x.js`、`C:\x`、`C:/x`、`\\server\share`、`/etc/passwd`、`--prefix=../x`、`--cache=../c`、`--outDir=../o`、`-o ../o`、`--results-directory=../r`、`--icu-data-dir=../i`、`--test ../x.js`、`--env-file=../e`、`-X pycache_prefix=../p`、`--rootdir=../r`、`--base=../b`、`--config=../c`（`=` 形式与分离形式都测了）。
+- **归一化判深浅这条改对了**：`src/../src/app.js` 深度始终 ≥ 0 放行，`sub/../../x.js` 掉到 −1 拒。这是「按值的形状判」而不是「见过 `..` 就拒」，方向对。
+
+#### R9【中，残余】盘符相对路径与「第二个等号」形态仍然漏
+
+`unsafePathToken` 的盘符正则现在只认 `^[A-Za-z]:(?:[\\/]|$)`。这个收窄本身是对的（不这么收窄会误杀 `--test-name-pattern=a:b`），代价是**盘符相对路径完全绕过深度检查**：
+
+```
+放行  node C:evil.js            ← 相对 C: 盘的当前目录，不在项目里
+放行  node c:..\..\x.js         ← 第一个 segment 是 `c:..`，不是 `..`，深度检查根本没触发
+放行  vite build --outDir=C:dist
+放行  tsc -p../tsconfig.json    ← 短开关贴值不取 `=`，整串当一个普通 token，深度 = +1
+放行  node --test --prefix=a=../x   ← 只拿第一个 `=` 切值，value = `a=../x`，深度 = +1
+放行  node --test --outDir==../x    ← value = `=../x`，同上
+```
+
+`c:..\..\x.js` 比 `C:evil.js` 严重：它**不需要攻击者知道 C: 盘的 cwd**——`..\..` 从任何目录都能往上退两级。
+§15 把 `C:evil.js` 记成「要求项目不在 C: 盘且攻击者知道 C: 上的 cwd，实际不可利用」，对 `C:evil.js` 勉强成立，**对 `c:..\..\x.js` 不成立**。我上轮在 KNOWN-ISSUES 里记的「不可利用」要**收回一半**。
+
+**修法与代价（实测，不是估计）**：把盘符规则扩成「值匹配 `^[A-Za-z]:[^\\/]`，**且**（token 里没有 `=` **或**盘符之后的部分里出现 `.` 或 `/`、`\`）」：
+
+- 合法 token **30 条**：现规则误判 0，**新规则误判 0**（命令级 19 条合法写法复测也是 0）；
+- 越界 token **23 条**：现规则漏 **6**，新规则漏 **2**；
+- 新规则**多挡住的正是**：`C:evil.js`、`c:..\..\x.js`、`C:dist`、`D:icu`；
+- **仍漏的 2 条**是另一支问题（只切第一个 `=`）：`--outDir==../x`、`--prefix=a=../x`。建议单独记 **R9-b**、进 KNOWN-ISSUES（造它需要 AI 在项目外有配合目录，独用不成链）。
+- 为什么 `--test-name-pattern=a:b` 不会被这条误杀：它满足「有 `=`」，且盘符之后是 `b`（无 `.`、无分隔符），两个条件都不成立。
+
+**不推荐的两种写法**：`^[A-Za-z]:` 一把抓（会误杀上面那种带冒号的合法参数值）；用 `fs.existsSync('C:\\')` 判「这是不是真盘符」（结果依赖运行环境，同一条命令在不同机器上判定不同，不可复现——评审里最不该出现这种）。
+
+### 16.4 R7-a 只**部分闭合**：假文件堵上了，真文件没堵（R10）
+
+先说**修对的地方**（这块 Lead 做对了，我不改口）：
+
+- 工具层注入 `projectFiles` 之后，`写了 src/app.js` 只在文件真存在时才能当证据；`创建了完全不存在-abc123.py` 拒；`删了 node_modules 下的 500 个包` 拒；不带文件名的证据拒；`do.files` 指向不存在的文件也拒。
+- `listProjectFiles` 出错时返回 `[]` → 所有 files 证据全拒，**fail-closed 方向是对的**（宁可把真证据拒掉，也不让假证据过）。这条我专门测了，方向正确，不要改。
+- 所以 §14 里那条「唯一一张 done 可以拿假 files 证据短路」的路，**确实断了**。
+
+#### R10【高，残余】`do.files` 可以点名**任何真实存在的文件**，包括脚手架自己写的
+
+判据是「点名的文件在不在项目里」，不是「点名的文件是不是这张卡做出来的」。于是：
+
+**(a) 端到端：3 张卡全部 done → `stage = done`，而用户业务文件是 `[]`。** 工具层，完整状态机：
+
+```
+① plando_scaffold  path=package.json  techId=t1  内容 {"name":"p","version":"1.0.0"}
+   → 已写 package.json。
+② 对 c1 / c2 / c3 各做一遍：
+   plando_card action=start  id=cN                              → 卡片 cN 已 start。
+   plando_card action=do     id=cN  files=["package.json"]       → 卡片 cN 已 do。
+   plando_card action=done   id=cN  evidence={kind:'files',
+        summary:'登录功能做完了，界面能显示'}                    → 卡片 cN 已 done。
+③ plando_transition event=cards_done → 已推进：build → ship（cards_done）
+   plando_transition event=ship_pass  → 已推进：ship → done（ship_pass）
+
+**stage = done**
+项目文件 = ["IDEA.md","TECH.md","package.json"]
+用户业务文件 = []            ← 用户一行代码都没有
+```
+
+「登录功能做完了，界面能显示」这句话本身没问题（够具体、有交付物），`package.json` 也**真的存在**——两个条件都满足，判定就过了。问题在于这两个条件与「这张卡有没有被做出来」**没有任何关系**。
+
+**(b) 脚手架自己写的东西被当证据（自我认证）**：`改了 package.json` 现在能过 files 证据。而 `package.json` 是 AI 自己能写的那 7 个文件之一。等于「先自己写一个配置文件，再拿它当自己干活的证据」。
+
+**(c) 纯函数层还漏一层**：`改了 IDEA.md` 在 `doneCard` 纯函数层能过，因为 `ARTIFACT_FILES` 只在 `listProjectFiles` 里被排除；一旦调用方没注入 `projectFiles`（或注入不过滤的清单），产物文件就成了合法证据。默认放，与 (a) 叠加时更危险。
+
+**为什么定「高」**：不需要任何伪造、不需要降级、不需要写一行用户代码，只用两个 API（`scaffold` + `card`）就能把 3 张卡走完、把状态机推到 `done`。这直接违反「不代写 + 验收」这条产品底线。
+
+**修法方向（不是名单）**：
+1. `do.files` 与 files 证据里出现 `scaffold.WHITELIST` ∪ `ARTIFACT_FILES` 中任何一个 → 拒。这两份名单**已经在代码里了**，做差集即可，不用新维护。
+2. `doneCard` 拿卡片自己的 `do.files` 做对齐：证据里点名的文件必须是 `do.files` 的子集（而不是「项目里任何一个真文件」）。
+3. 复用 16.6 的「业务文件数 > 0」前置条件——两处共用同一份 `listProjectFiles` 数据，一次改两处收益。
+
+### 16.5 R7-b 只**部分闭合**：误放清零是真的，但误杀比上轮报的多，而且一句话就能绕（R11）
+
+先说「Lead 治的不是自己造的病」这件事：**在我 §14 的 48 条自己的样本上，他的数字是对的。**
+
+- 36 条空话：误放 **28/36 → 0/36**（我上轮测 28，他 §15 也写 28，完全对上）；
+- 12 条真实理由：误杀 **0/12 → 1/12 = 8%**。被误杀的是 `时间不够，只做了输入框`。**这条不是他 §15 里说的那条故意拒的「时间不够」**——它有交付物（`输入框`），是条合格的真话，属于真误杀。
+- 原因是机械的：删掉 `时间不够` 与 `了` 之后只剩 `只做输入框` = 5 个字符 < 6，且没有 marker（中文既不是数字也不是 ≥3 字母拉丁词）。
+
+**换成更口语的纯中文真话，误杀率明显更高：3/9 = 33%。**
+
+```
+误杀  时间不够，只做了输入框
+误杀  时间不够，只跑通构建
+误杀  证书有问题，暂时跳过
+放行  电脑坏了，重装系统要明天
+放行  需求改成先做登录了
+放行  接口文档还没给我，卡住了
+放行  老板临时加了活，这周没空
+放行  先做注册，登录放后面
+放行  依赖装不上，先跳过这块
+```
+
+对照（本来就该拒的纯空话）6 条 **0 漏放**：`不想做了` / `算了` / `太难了` / `时间不够` / `不想学了` / `放弃`。
+所以判据不是失效，是**在「短句 + 纯中文」这条窄带上采样不足**。
+
+#### R11【中，新】`hasMarker` 是**一跳即过**的旁路：加一个数字或一个英文词就放行
+
+新判据是「删掉空话词后剩 ≥6 个实质字符，**或**出现可指认标记（文件名 / 数字 / ≥3 字母拉丁词）」。后半句是短路——命中就不再看前半句：
+
+```
+放行  不想做了 2        放行  算了 demo      放行  太难了 vue
+放行  放弃 abc          放行  随便 5         放行  跳过 1
+放行  不做了 9          放行  哈哈哈哈 3     放行  算了 100
+放行  太难了 3
+```
+
+**10/10 全过。** `哈哈哈` 加个 `3` 就变成「可指认对象」了。而且这个旁路与误杀是**同一个机制的两面**，能摆出严格的不对称：
+
+```
+拒   时间不够，只跑通构建     ← 人话，有交付物，被误杀
+放   时间不够，只跑通 demo     ← 同一句，只把「构建」换成英文，就过了
+```
+
+一边把中文真话拒掉，一边让「算了 demo」放行。这不是「判据偏严」，是判据在**语言形态**上分了叉。
+
+另外新造的空话（词表里没有的）仍有泄漏：我新写 24 条不在 `DOWNGRADE_VAGUE` 里的句式，漏 **6/24**（`这块来不及弄`、`一时半会弄不完`、`这个事情比较费劲`、`精力实在跟不上`、`拖到后面再说`、`搞起来太麻烦`）。
+
+**为什么定「中」而不是「高」**：需要 AI 主动撒谎，且 `cards_done` 还有「`realDone.length > 0`」兜底，全降级到不了 `done`。它影响「降级这条路好不好走」，不是「最终能不能混过去」。
+
+**修法方向**：取消 `hasMarker` 的短路地位，改成**两条都要满足**——「有可指认标记」**且**「删掉空话词后剩 ≥4 字」（6 降到 4，给 `只做输入框` 这种短句留活路）。数字和英文词本身不构成「可指认的对象」：`demo`、`vue`、`abc`、`2` 都不是交付物。§15 自己写了「词表只做删除、不做判决」——那就别让 marker 去做判决。更稳的做法是把这条改成**引导式追问**（拒绝理由里直接给两个带交付物的模板），而不是继续调词表与字数。
+
+### 16.6 R3 是**未闭合**：R12 —— 零测试文件也能让「检查通过」，一路到 `done`
+
+这是这轮最该先修的洞，因为它**不需要任何欺骗**，也不需要 R7-a / R7-b 里的任何东西，更不需要写用户代码。
+
+**物理事实**：`node --test` 在项目里**一个测试文件都没有**时，退出码是 **0**。
+
+```
+node --test（0 个测试文件）                          exit=0
+node --test nonexistent/**/*.test.js                 exit=0
+npm test --if-present（package.json 里没有 test 脚本） exit=0
+```
+
+而 M4 的判据是 `last-check.json` 的 `ok`（等于「退出码是不是 0」）。于是：
+
+**复现 A（用脚手架造一个「合法但空」的包）**——工具层，完整链路：
+
+```
+① plando_scaffold path=package.json content {"name":"p","version":"1.0.0","scripts":{"test":"node --test"}}
+   → 已写 package.json。        ← 白名单文件、合法脚本值，没有任何可疑之处
+② 对 c1 / c2 / c3 各做：
+   plando_card  action=declare id=cN command=npm test → 已为卡片 cN 声明检查命令：npm test
+   plando_card  action=start   id=cN                  → 卡片 cN 已 start。
+   plando_check action=run     name=cN                → · 检查 cN：通过｜退出码 0
+   last-check.json = {"ok":true,"exitCode":0}
+   plando_card  action=done    id=cN evidence={kind:'check', summary:'测试跑通了，退出码 0'}
+                                                      → 卡片 cN 已 done。
+③ event=cards_done → 已推进：build → ship（cards_done）
+   event=ship_pass  → 已推进：ship → done（ship_pass）
+
+**stage = done**
+项目文件 = ["IDEA.md","TECH.md","package.json"]
+用户业务文件 = []            ← 用户一行代码都没有
+```
+
+**复现 B（更短，连 `package.json` 都不用）**：
+
+```
+plando_card  action=declare id=c1 command=node --test   → 已为卡片 c1 声明检查命令：node --test
+plando_check action=run     name=c1                     → · 检查 c1：通过｜退出码 0
+plando_card  action=done    id=c1 evidence={kind:'check', summary:'测试跑通了'}
+                                                        → 卡片 c1 已 done。
+项目文件 = ["IDEA.md","TECH.md"]      ← AI 一个字都没写
+```
+
+**这不是 M4 修错了，而是 M4 的判据太薄**：「检查通过」的物理含义只剩一个 `exit code 0`，而 `exit code 0` 在「什么都没跑」时也会出现。
+对照组证明方向是对的：项目里放一个**必然失败**的测试（`assert.equal(1, 2)`）时，`run` 退出码 1、`done` 被 M4 拒（理由「检查上次没通过（退出码 1）」）。所以 M4 在「有输出且失败」时完全有效，**在「零输出」时完全失效**。
+
+**修法方向（三条，都便宜）**：
+
+1. **把「项目里有没有用户代码」做成 `done` 的前置条件**（而不是只做 files 证据的后置核对）：`listProjectFiles` 返回的业务文件数为 0 时，`kind:'check'` 的证据一律判为「空检查」。它已经存在、已经排除产物与 `node_modules`、已经 fail-closed，**直接复用，零新代码面**。与 R10 的修法共用同一份数据。
+2. **（可选加强）要求输出里有「跑了东西」的痕迹**：`node --test` 会打印 `ℹ tests N`，`npm test` 会打印 `> p@1.0.0 test`。但这条要按工具分别定义，又变成名单——所以只作为第 1 条的补充，不单独立规。
+3. **拒绝理由要教它怎么办**：`plando：检查通过了但项目里还没有测试文件——下一步：先写一个断言当前功能会失败的测试（如 test/login.test.js），让它先红再绿。`
+
+### 16.7 R13【高，新】`npm test -- <参数>` 是第二条洗白前缀——`npx` 修好之后，这一类原样复活
+
+§15 的方法论结论是「名单是枚举攻击面，补不完；结构化剥壳才是修一类」。这句话对 `npx` 完全成立。**但它只修了 `npx` 这一个剥壳对象。** 同一个结构还有第二个实例：**包管理器把「脚本名之后的参数」转发给自己执行的脚本**。
+
+```
+直接写（被拒）                            加 `npm test --` 前缀（放行）
+node --test --import=./h.mjs        拒    npm test -- --import=./h.mjs        放
+node --test --loader=./h.mjs        拒    npm test -- --loader=./h.mjs        放
+node --test -r ./h.mjs              拒    npm test -- -r ./h.mjs              放
+node --test --test-reporter=./h.mjs 拒    npm test -- --test-reporter=./h.mjs 放
+```
+
+**「会让 node 加载任意模块」的开关 10 条，全部被这样洗白（10/10）**。没被洗白的两条是 `--test-reporter-destination` 与 `--redirect-warnings`——它们撞上了「写文件开关整类拒」那道**全 argv 扫**的闸门（0/2）；`--inspect` 本来就两头都放。
+
+根因在 `validateArgv` 的闸门顺序：解释器那几道（`INTERPRETER_DENY_FLAGS`、`FLAGS_WITH_SAFE_VALUES`、`GLUED_FLAGS_BY_BASE`）都是**按 `argv[0]` 判**的。`npm test -- X` 的 `argv[0]` 是 `npm`，于是那几道**一道都不跑**；写文件那道是全 argv 扫，所以不受影响。这与 R5 的根因**一模一样**（`npx` 的 `argv[0]` 是 `npx`，于是后面全不看）。
+
+**最狠的一条：`data:` URI 让它连「项目里得有个模块文件」都不需要。**
+
+```
+闸门：node --test --import=data:text/javascript,<urlencoded>   → 拒
+闸门：npm test -- --import=data:text/javascript,<urlencoded>   → 放行
+实跑：exit=0，内联模块被执行，用户项目里凭空多出一个文件
+```
+
+`--loader=data:…` 同样成立（`-r data:…` 不行，`require` 不认 `data:`，但 `--import` / `--loader` 认）。
+
+**端到端（工具层，AI 只做两件事：声明一条检查命令 + 让脚手架写 `package.json`）**：
+
+```
+用户项目初始文件（AI 一个字都没写）：package.json, test/login.test.js
+待声明命令：npm test -- --import=data:text/javascript,…（一行内联的 fs.writeFileSync）
+闸门裁定：放行
+对照「直接写」：拒绝        ← 只差一个「npm test -- 」前缀
+
+c1: declare → 已为卡片 c1 声明检查命令：npm test -- --import=data:…
+    run     → · 检查 c1：通过｜退出码 0
+    R13-PWNED.txt = true   内容 = ARBITRARY-CODE-RAN
+    done    → 卡片 c1 已 done。
+c2: 同上
+cards_done → 已推进：build → ship
+ship_pass  → 已推进：ship → done
+**stage = done**
+```
+
+**第二条入口：脚手架单独就能造出这条链（单层写法被挡，两层没挡）**：
+
+```
+scripts.test  = "node --test --import=<data:>"     → 脚手架**拒绝**（挡对了）
+scripts.build = "npm test -- --import=<data:>"     → 脚手架**放行**
+```
+
+实测：脚手架写 `{"test":"node --test","build":"npm test -- --import=<data:>"}` → **落盘**；然后 `declare command="npm run build"`（闸门放行，因为 `npm run build` 是合法脚本名）→ `run` 通过 → `SCAF-PWN.txt` 落盘。**用户代码一行没写，脚本值单看每一段都合法。**
+
+**为什么定「高」**：等价于「`plando_check` 里的一次任意代码执行」，不需要用户写代码、不需要降级、不需要假证据，而且能一路推到 `stage = done`。它绕过的正是 §15 认为已经修好的那一类。
+
+**修法与代价（实测）**：「转发参数闸门」——`<包管理器> <脚本> [--] <参数…>` 里，脚本名之后的参数要按**解释器的口径**再判一遍（`--import` / `--loader` / `--experimental-loader` / `--require` / `-r` 命中即拒；`--test-reporter=` 的值不在内置名单里即拒）。
+
+- 合法转发写法 10 条（`npm test -- --coverage`、`npm test -- --watch`、`npm test -- --runInBand`、`npm run lint -- --fix`、`npm run build -- --mode production`、`npm test -- --reporter=verbose`、`npm test -- --updateSnapshot`、`npm test -- --testPathPattern=src`、`pnpm test -- --coverage`、`yarn test -- --watchAll`）：**误杀 0**；
+- 危险转发写法 6 条（`--import=./h.mjs`、`--require=./h.mjs`、`--loader=./h.mjs`、`-r ./h.mjs`、`--test-reporter=./h.mjs`、`--import=data:…`）：**挡住 6/6**；
+- 这条闸门只扫「脚本名之后」的参数，所以 `mocha --require ./setup.js` 这种**直接写**的合法用法**完全不受影响**（它走的是解释器原有的闸门）。
+
+**一个坑要注意**：`npm test sub/pwn.js`（**不带** `--`）也会把 `sub/pwn.js` 转发进去（实测 `node --test sub/pwn.js` 真被执行）。所以闸门必须覆盖「脚本名之后的**所有**非开关 token」，不能只覆盖 `--` 之后。
+
+### 16.8 回答 Lead 说「我判不了」的三件事
+
+#### (1) `C:evil.js` 该不该拦、怎么拦 —— **该拦，但不是我原来给的那条规则**
+
+我上轮在 KNOWN-ISSUES 里把它记成「不可利用」，这次**收回一半**：`C:evil.js` 确实需要知道 C: 盘的 cwd，但 `c:..\..\x.js` 不需要（`..\..` 从哪个目录都能往上退）。所以它不是理论问题，是「换一个写法就可用」的问题。
+
+**建议规则**（16.3 量过代价）：
+
+> 值（`=` 之后，或整个 token）匹配 `^[A-Za-z]:[^\\/]`，**且**（token 里没有 `=` **或** 盘符之后的部分里出现 `.` 或 `/`、`\`）→ 拒。
+
+- 合法 token 30 条 → 误判 **0**；越界 token 23 条 → 漏从 **6 降到 2**（且那 2 条属于 R9-b「第二个等号」这一支）。
+- `--test-name-pattern=a:b` 不受影响：有 `=`，且盘符之后是 `b`（无 `.`、无分隔符），两个条件都不成立。
+
+#### (2) `npx vitest`（只有包名、会下载最新版）该不该关 —— **该关，但只关「光秃秃」这一种形态**
+
+先说这轮新测出来、比我上轮说的更重的事实。**`npx <名字>` 日常跑的不是本机同名工具，而是从 registry 下载的同名包**：
+
+```
+本机 node = v24.21.0（C:\Program Files\nodejs\node.exe）
+npx node --version  → v27.0.0-alpha.0.1.1
+npx 缓存里装下来的包：node@27.0.0-alpha.0.1.1（preinstall: node installArchSpecificPackage）、node-bin-setup@1.1.4
+```
+
+```
+白名单 39 个工具里，本机 PATH 上有的只有 11 个（node npm python python3 py pytest pip dotnet java ruff uv）；
+剩下 28 个 `npx <名字>` 只能去 registry 下载：
+pnpm yarn cargo go mvn gradle deno bun tsc vitest jest mocha eslint prettier mypy black
+vite next react-scripts webpack rollup esbuild parcel nodemon pm2 tsx ts-node serve
+```
+
+其中几个名字在 registry 上是**完全不同的程序**，还带安装钩子：
+
+```
+npx --yes tsc --version → exit=1，输出 "This is not the tsc command you are looking for"
+   实际装的是 tsc@2.0.4（registry 描述：「A deprecated release of the TypeScript compiler」，仓库 github.com/basarat/tsc）
+   对照：npx --package typescript -- tsc --version → Version 7.0.2
+registry 上有安装钩子的：deno（postinstall: node ./install.cjs）、bun（postinstall: node install.js）、esbuild（postinstall: node install.js）
+```
+
+**结论分两层**：
+
+- **不关的理由（这一层我同意 Lead）**：它是**供应链风险**，不是**闸门绕过**。剥壳之后 `npx X` 与 `X` 的判定完全相同，624 组矩阵 0 洗白已证明。供应链风险的真正解法是「让用户自己 `npm i -D`」，不是插件去猜哪个包可信。
+- **但要关「光秃秃的 `npx <工具>`」**（这一层是我要加的）：`npx vitest` 与 `npx vitest run` 在**闸门眼里一模一样**，在 **npm 眼里完全不同**——前者是「下载并执行最新版 vitest 的默认行为」（交互式 watch，在守卫里只会挂满 60 秒超时），后者才是「跑一遍测试」。真跑工具都会带子命令或参数。
+  - 代价实测：§9.6.2 的 23 条合法写法里，光秃秃的只有 `npx webpack` 这 **1 条**；而它本身就会挂 60 秒超时（§15 的 KNOWN-ISSUES 里也记着 `--watch` 挂超时）。
+  - 规则：剥壳后 `rest.length === 1`（只剩包名、没有任何参数）→ 拒，理由写成「`npx webpack` 会下载并执行最新版——写成 `npx webpack --mode production`，或直接用已装的 webpack」。
+
+#### (3) 「保留 npx 开关白名单」这个理由成不成立 —— **理由成立，但名单里有两项是错的**
+
+你的原话：「枚举的是 npx 自身的开关（数目有界、随 npm 版本收敛），不是『任意命令的任意参数』」。**这个区分是对的，我同意**，而且有实测支持：624 组矩阵 0 洗白，说明这条名单本身没变成新的绕过面（它挡住的 `-p` / `--package` / `--node-options` / `-c` 都是真洞）。
+
+**但「无副作用」不能按名字猜，必须逐个实测语义**——这轮在名单里找到两项不合格：
+
+```
+项目里预置一个必然失败的测试（真跑了必定 exit 1）
+npx node --test              → exit=1  真跑了测试=是
+npx -y node --test           → exit=1  真跑了测试=是
+npx --no-install node --test → exit=1  真跑了测试=是
+npx -q / --quiet / -s / --silent node --test → exit=1  真跑了测试=是
+npx --no node --test         → exit=0  真跑了测试=**否**
+npx --no-cache node --test   → exit=0  真跑了测试=**否**
+```
+
+`--no` 与 `--no-cache` 都**不是**「减少输出的开关」：npm 的 `--no` 是「布尔取反前缀」，它会把后面的 token 当 npm 配置解析（`npm warn Unknown cli config "--test"`），于是整条子命令被吃掉，node 拿到空 argv → 读空 stdin → 立即 `exit 0`。
+
+端到端后果（工具层，3 张卡全走 `npx --no`）：
+
+```
+declare 「npx --no node --test」→ 已为卡片 c1 声明检查命令
+run  → · 检查 c1：通过｜退出码 0     （stderr 里只有一句 npm warn Unknown cli config "--test"）
+done → 卡片 c1 已 done。            （c1 / c2 / c3 全一样）
+cards_done → 已推进：build → ship
+ship_pass  → 已推进：ship → done
+**stage = done**，而那个必失败的测试文件一行都没跑
+```
+
+**建议**：
+1. 把 `--no` 与 `--no-cache` 从 `NPX_SAFE_FLAGS` 里删掉（代价：实测没有任何合法写法依赖它们；用到它们的 3 条里，`--no` 那两条在真实 npx 下本来就是跑错的）。
+2. 加一条**断言式测试**，把「名单项无害」从**判断**降级成**可执行断言**：
+
+> 项目里放一个必然失败的 `test/must-fail.test.js`，对 `NPX_SAFE_FLAGS` 的每一项断言 `npx <flag> node --test` 的退出码 **≠ 0**。任何一项让退出码变成 0，就说明它吞掉了子命令。
+
+### 16.9 回归：这一轮的所有改动没有把别的地方弄坏
+
+| 回归面 | 结果 |
+|---|---|
+| §9.6.2 的 23 条常见 build 写法（`checks` 层） | 放行 **21/23**；拒的 2 条是 `rimraf dist && vite build` 与 `cross-env NODE_ENV=production vite build`——**这两条在 `checks` 层从来就不该由它管**（壳是 `scaffold` 的职责），`scaffold` 层 23/23 全过 |
+| 同样 23 条写进 `scripts.test`（`scaffold` 层） | **23/23 放行，0 误杀** |
+| 4 条友好壳（`scaffold` 层） | `rimraf dist && vite build` 放、`cross-env NODE_ENV=production vite build` 放；`env-cmd -f .env vue-cli-service build` 拒、`dotenv -e .env -- vite build` 拒（`env-cmd` / `dotenv` 这两种壳的语义与实现不符，属于设计取舍，不是回归） |
+| §9.3 的 8 条 payload（`checks` 层） | **漏 0/8** |
+| G1 的 14 条 | **漏 0/14** |
+| `scaffold` 的 `scripts` 值层（`node -e` / `python -X utf8 -c` / `npm install` / `curl` / `&&` 后接 `node -e` / `NODE_OPTIONS=` 前缀） | **漏 0/5** |
+| `&&` 链 | `npm test && node pwn.js` 之类在 `checks` 层**放行**（见 16.7 的机制说明：`shell:false` 下 `&&` 只是字面参数，不是分隔符；真正危险的是 npm 的**参数转发**），`scaffold` 层按段校验、每段都过 |
+
+**一个必须说清的回归认知**：`checks` 层用 `spawnSync(..., shell:false)` 执行，所以 `&&` **不会**被 shell 解释——`npm test && node sub/pwn.js` 实际跑的是 `npm test && node sub/pwn.js` 这一串 argv，`&&` 只是被 npm 拼进 scripts 命令串的字面量。
+我一开始把它当成「链式执行」去测，差点得出错误结论；后来用「不带 `&&` 的等价写法 `npm test sub/pwn.js`」做对照，两者都能让 `sub/pwn.js` 被执行，才定位到真正的原因是**npm 的参数转发**（R13），而不是 `&&` 被解释。这条对照已经写进 16.7。
+
+### 16.10 判决有没有变
+
+**没变：`v0.1.0` 现在还是不能发（§6 的结论继续有效）。** 但阻塞项的**性质**变了，这决定下一步该干什么：
+
+- **§6 当时的主要阻塞是「命令层能跑任意代码」**。这一层这轮确实收住了两个大类：R5（`npx` 洗白）与 R6（路径类参数）都是**真闭合**——0 洗白、0 误杀、0 漏，而且修法是结构性的（剥壳 / 按形状判），不是补名单。
+- **现在的第一优先级是「产出为零也能到 `done`」**，共三条路：
+  - **R12**：0 个测试文件也让「检查通过」成立（`node --test` → `exit 0`），3 张卡走完 `stage = done`，用户业务文件 `[]`。**不需要任何欺骗。**
+  - **R10**：`do.files` 点名一个**真实存在**的文件（哪怕是脚手架自己写的 `package.json`）就能当交付证据，3 张卡走完 `stage = done`，用户业务文件 `[]`。**不需要任何伪造。**
+  - **R13**：`npm test -- <参数>` 洗白（10/10 条模块加载开关可洗白，`data:` URI 连项目文件都不需要），且脚手架单独就能造出这条链。**它同时是一条任意代码执行。**
+- **R9**（盘符相对）与 **R11**（降级理由旁路）是「修法便宜、本轮没收」的两个小口子。
+
+**发版门（我的建议，按顺序）**：
+
+1. **R12 必修**：`done` 前要求「项目里至少有一个用户业务文件」（复用 `listProjectFiles`，零新代码面）。
+2. **R13 必修**：加转发参数闸门（脚本名之后的参数按解释器口径再判），6/6 挡住、0 误杀。
+3. **R10 必修**：`do.files` / files 证据禁止点名 `scaffold.WHITELIST` ∪ `ARTIFACT_FILES` 里的文件；证据与卡片自己的 `do.files` 做对齐。
+4. **R5 的名单修正必修**：删 `--no` / `--no-cache`，加「名单项必须让子命令真跑」的断言测试。
+5. **R9 顺手修**（5 行、0 误杀）；**R11 建议改成引导式追问**，别继续调词表与字数。
+
+### 16.11 这轮的方法论修正（写进下一轮的评审口径）
+
+**第一条**：§15 说「名单是枚举攻击面，补不完；结构化剥壳才是修一类」。这句对，但**只修一类还不够，要问「同类还有谁」**。
+
+`npx` 那一类修好之后，同一结构在**上一层**原样复活：`<包管理器> <脚本> -- <参数>` 也是「把 argv 转发给另一个程序」。两处都是「入口程序看到的 argv 不是下游程序看到的 argv」。所以正确的问法不是「`npx` 后面能写什么」，而是：
+
+> **这条命令最后实际执行的那个程序，收到的 argv 是什么？如果不是我审的那一份，就再审一遍。**
+
+按这个问法过一遍，能一次找到 `npx`、`npm`/`pnpm`/`yarn` 转发、`cross-env`/`rimraf` 这类「壳」三类——第三类在 `scaffold.js` 里已经用「剥壳 + 每段单独校验」修过了，修法就在隔壁文件里。
+
+**第二条**：**「修好了」要用「另一端还能不能到 `done`」来验，不是用「这一条命令判得对不对」来验。**
+R5 / R6 在纯函数层是满分，但 R12 / R10 在工具层能把状态机推到 `done` 而用户代码是 `[]`。所以这轮每个「闭合」判定我都跑了一遍完整状态机，只有 G2 那条链是真的跑不到 `done`。
+
+**第三条**（对上一轮的自我修正）：我上轮把 `C:evil.js` 记成「实际不可利用」是错的，漏了 `c:..\..\x.js` 这个不需要知道 cwd 的变体。
+**「需要额外条件」不等于「不可利用」——要看这个条件是不是攻击者能自己造出来的。** `..\..` 就是他自己造的。
+
+**第四条**：**「名单里的每一项无害」不能靠读名字判断，要靠一条会让它失败的测试。**
+`NPX_SAFE_FLAGS` 里的 `--no` 与 `--no-cache` 单看名字像「减少输出」，实测却会吞掉整条子命令让退出码变 0。凡是「枚举出来的无害项」，都应该配一条「让它必须产生可观测失败」的断言——这是名单类修法唯一靠谱的护栏。
+
+## 17. §16 的处置记录（Lead 收到第五轮复核后同一轮内完成）
+
+### 17.0 总账：§16 提的 6 项，这一轮全部有落点
+
+| 项 | §16 的判决 | 这一轮做了什么 | 现在的状态 |
+|---|---|---|---|
+| **R13**（高，新）`npm test -- <参数>` 洗白 | 未闭合，10/10 可洗白 | 加「转发参数闸门」：脚本名之后的**所有** token 按解释器口径重判（`unsafeForwardedArg`） | **闭合**：7/7 挡住，6 条合法转发 0 误杀 |
+| **R12** 零测试文件也能「检查通过」 | 未闭合，不需要欺骗 | `doneCard` 加前置闸：项目里必须至少有一个**用户自己的产出**；`listProjectFiles` 同步排除脚手架能写的 7 个配置文件 | **闭合**：`declare→run→done` 三步链在空项目上走不通 |
+| **R10** `do.files` 点真实存在的配置文件即可交付 | 未闭合 | 同上前置闸 + `normalizeProjectFiles` 自己再排一次模式产物（不只依赖调用方） | **闭合**：`package.json` 不再能当证据 |
+| **R11** 降级理由「空话 + 数字」旁路 | 未闭合（口语 3/9） | 数字不再单独算「可指认的标记」；`DOWNGRADE_VAGUE` 补 7 个「往后推」的口语词 | **闭合**：12/12 挡住，12/12 真理由不误杀 |
+| **R9** 盘符相对路径 `c:..\..\x.js` | 未闭合（我上轮判「不可利用」是错的） | `unsafePathToken` 按形状补三条：盘符相对、短开关贴 `..`、`=` 后分段再判 | **闭合**：7/7 挡住，3 条合法写法（含 `--test-name-pattern=a:b`）0 误杀 |
+| **NPX_SAFE_FLAGS 的 `--no` / `--no-cache`** | 未闭合，会吞子命令 | 两项删除；新增 `test/npx-flags.test.js`，对名单每一项跑**真 npx** 并断言退出码透传 | **闭合**：7 项全过「必须让子命令真跑」的断言 |
+
+外加 §16 顺手报的 **`SAFE_SCRIPT_KEYS` 3/24 假杀**（`preview` / `clean` / `build:prod`）：按 §15 的结论改成「小名单 + 冒号命名空间」，并加了**行为级**漂移断言（同一个键，`plando_scaffold` 与 `npm run <键>` 必须同结论）。
+
+测试从 397 条增加到 **404 条**，`node --test` 全绿；`check-docs` / `verify-pack` / `smoke-pack` / `release-check` 四条验证脚本全绿。
+
+### 17.1 R13 的修法：把「转发」当成一次剥壳，不是加一张黑名单
+
+§16 指出的机制值得原样抄在这里，因为它决定了修法该长什么样：
+
+> `npm test -- --import=./h.mjs` 里，npm 会把 `--import=./h.mjs` **转发**给它跑的脚本。
+> 而解释器那几道闸门全部按 `argv[0]` 判——`argv[0]` 是 `npm`，于是一道都不跑。
+
+这就是 `npx` 洗白（R5）的同胞：**入口程序看到的 argv 不是下游程序看到的 argv**。所以修法也照抄 `npx` 那一处——剥壳、把下游真正收到的 argv 再判一遍：
+
+```js
+// 脚本名之后的参数会被包管理器转发给下游程序，按解释器口径重判
+if (idx >= 0) {
+  for (let i = idx + 1; i < args.length; i++) {
+    const forwarded = unsafeForwardedArg(args[i]);
+    if (forwarded) return `「${forwarded}」会在脚本里被执行（包管理器会把参数转发过去），…`;
+  }
+}
+```
+
+三个细节是实测出来的，不是猜的：
+
+1. **扫「脚本名之后的所有 token」，不是只扫 `--` 之后**。`npm test sub/pwn.js`（不带 `--`）一样会被转发——npm 把多余参数直接拼进 scripts 命令串。只判 `--` 会留一条一模一样的旁路。
+2. **贴值形式要单独判**（`-r./x.cjs` / `-e1+1`）。`FORWARD_DENY_FLAGS.includes(name)` 对 `-r./x.cjs` 是 false，因为它不是精确相等的名字。
+3. **`--test-reporter=<模块路径>` 与解释器那边同口径**（只认内置名字）。同一个开关在两处判据不一致，就是下一轮的新 bug。
+
+### 17.2 R12 / R10 的修法：判「有没有产出」，不判「跑没跑」
+
+这两项是同一个洞的两面：**「检查通过」不等于「有东西被做出来」。**
+
+- R12 的现场：`node --test` 在一个测试文件都没有的项目里退出码是 **0**（不是 1、不是错误，就是 0）。于是 `declare node --test → run（通过）→ done` 三步就能把卡收掉，AI 一个字都没写。
+- R10 的现场：`do.files` 点名一个**真实存在**的文件就能当交付证据——而脚手架自己能写 `package.json`，于是「我自己造的证据证明我自己干完了」。
+
+修法是把判据从「跑没跑」换成「有没有产出」，并且**产出的定义要排除自己造的东西**：
+
+```
+项目里的「用户自己的产出」
+  = 普通文件
+  − 模式产物（IDEA.md / TECH.md / VERIFY.md / HANDOFF.md / CHANGE-GUIDE.md）
+  − 脚手架能写的 7 个配置文件（package.json / tsconfig.json / …）
+```
+
+这两个排除项是这项修复的**全部要点**——不排除它们，任何「AI 自己造的产物」都能自我认证。排除清单从 `deps.scaffold.WHITELIST` 现读，不手抄，这样以后扩白名单不会漏。
+
+代价（要明说）：`plando_card done` 在一个**只写配置**的项目上会拒。但这恰好是想要的——只写配置等于没做东西。
+
+### 17.3 R11 的修法：不是调词表，是拆掉一个错误判据
+
+§16 说得对：「一个数字也算标记」这条判据本身就是旁路——空话后面随便缀个数字就能收卡（10 句 10 过）。
+
+删掉 `/\d/` 这一支。理由是它本来就答错了问题：**「第 1 步」说的是进度，判据要的是「交付了什么」**。数字仍然参与字数统计，所以 `'第 2 步做完了，第 3 步没开始'` 这种真理由照旧通过（实测 12/12）。
+
+补的 7 个词（`懒得` / `下次` / `明天` / `再说` / `先做` / `先看` / `攒`）不是「给攻击面打补丁」，而是收「口语里表达『算了』的常用说法」——它收敛，所以能列；**判决权仍然在「删完还剩多少实质内容」那条规则手里**，新造一句空话最多让它多写几个字。
+
+### 17.4 R9 的修法：形状判据的三条补充
+
+`unsafePathToken` 原来只认「盘符 + 分隔符」，于是 `c:..\..\x.js` 整个漏了。§16.11 第三条对我上一轮的判断做了修正，这条修正值得留档：
+
+> **「需要额外条件」不等于「不可利用」——要看这个条件是不是攻击者能自己造出来的。**
+> `..\..` 就是他自己造的。
+
+补的三条：
+
+1. **盘符相对**（`C:evil.js` / `c:..\..\x.js`）——要求盘符之后出现 `.` 或分隔符才认，这样 `--test-name-pattern=a:b` 这种**参数值**里带冒号的合法写法不会被误杀（§15 踩过这个坑）。
+2. **短开关贴 `..`**（`-p../tsconfig.json`）——注意只认两个点：`-r./x.cjs` 里的 `./` 不是越界，它是项目内相对路径，而且那种写法本来就被解释器闸门以「执行任意代码」拒掉了。
+3. **`=` 之后再出现 `=`**（`--prefix=a=../x` / `--outDir==../x`）——按 `=` 切开，每一段独立走一遍深度判定。
+
+### 17.5 `NPX_SAFE_FLAGS` 的护栏：一条会让名单项失败的测试
+
+§16.11 第四条是对的，而且它比「删掉两个坏项」重要得多：
+
+> **「名单里的每一项无害」不能靠读名字判断，要靠一条会让它失败的测试。**
+
+新增 `test/npx-flags.test.js`，判据很硬：
+
+```
+npx <开关> node -e "process.exit(9)"   →  整条命令的退出码必须是 9
+```
+
+子命令被 npm 当配置吃掉时，npx 自己会以 **0** 结束（它觉得没事可做）——这就是可观测的失败。这条测试用**真 spawn**，不 mock：这一层的风险恰恰是「我以为它无害」，mock 掉 npx 就永远发现不了。
+
+同时保留一条对 `--no` / `--no-cache` 的**反向**断言（它们必须以 0 结束、必须被 `validateCommand` 拒）。如果哪天 npm 改了行为、这两项不再吞子命令，那条断言会红，提醒重新评估名单——而不是默默放开。
+
+代价：这个测试文件单独跑约 22 秒（每次 npx 启动约 2 秒 × 9）。`node --test` 按文件并行，整体只从 7 秒变成 24 秒，可以接受。
+
+### 17.6 顺带修的 `SAFE_SCRIPT_KEYS`：加名字治不了根，命名空间能
+
+§16 报 3/24 假杀（`preview` / `clean` / `build:prod`）。加名字治不了根——`build:<任意>` 是无穷的。按 §15 的结论改成两条规则：
+
+1. **没有冒号的键**必须在名单里。这一条**必须**靠枚举（npm 的生命周期钩子就是「任意名字」），但名单有界，因为「跑检查/构建」的常用键收敛。
+2. **带冒号的键**只要求冒号前是名单里的基名。这一条**能**结构化，因为 **npm 的生命周期钩子里没有一个带冒号**——`pre*` / `post*` 前缀的都是钩子，而 `build:prod` 永远只是被显式调用的脚本。
+
+顺带把 `checks.js` 的 `PM_SAFE_SCRIPTS` 改成同一套判据，并加**行为级**漂移断言：同一个键，`plando_scaffold` 写得进去 ⟺ `npm run <键>` 放行。这比「两份名单字符串相等」强，因为它盯的是用户能观测到的结论。
+
+代价（故意的）：`prepare` / `prepublishOnly` 不放行。它们确实是生命周期钩子，装了 husky 就等于装了别的包，超出「跑检查」的范围。
+
+### 17.7 这一轮之后，还剩什么
+
+**没剩阻塞项。** §16.10 列的五条发版门，这一轮全部落地：
+
+1. ~~R12 必修~~ ✅
+2. ~~R13 必修~~ ✅
+3. ~~R10 必修~~ ✅
+4. ~~R5 名单修正必修~~ ✅
+5. ~~R9 顺手修~~ ✅；R11 改掉了错误判据 ✅
+
+**还开着的、但已经写进 README「已知残余」的**（都是「拦不住但不构成实际风险」或「拦了会误杀得更狠」）：
+
+- 裸写 `npx <工具>`（`npx vitest`）仍放行。§16.8(2) 建议拒，**没有采纳**——理由见下。
+- `node evil.js` / `deno run x.ts` / `bun run x.ts` 放行（要求项目里本来就有那个文件，而本插件写不出 `.js`）。
+- 白名单内工具 + 无意义开关的组合会放行（到工具那一步自己报错）。
+
+**为什么没采纳「拒掉裸 `npx <工具>`」**：那条建议的依据是 `npx vitest` 会进交互式 watch、在守卫里挂满 60 秒超时。这个事实成立，但「挂满超时」的后果是**按失败处理**（超时不是通过），不构成绕过；代价却是实打实的误杀——`npx jest` / `npx webpack` 是标准写法（npx 先找本地的 `node_modules/.bin/`，本地装了就不下载），而且 `npx jest` 的默认行为就是跑一遍测试。要区分「bare 会进 watch」的那些工具，就得再列一份名单——正是三轮里反复翻车的那种修法。**记进「已知残余」，不装作拦住了。**
+
+### 17.8 方法论的第四条（自我修正）
+
+§16.11 那三条我全部接受，并且这一轮又撞上它们的两个新实例：
+
+- 第一条（问「下游收到的 argv 是什么」）让我一次找到了 R13，而不是逐个开关去堵。
+- 第四条（名单项必须配会失败的测试）让我发现 `--no` 根本不是「少输出」，而是把子命令整个吃掉。
+
+**要补的第五条**：**修完之后要重跑「另一端还能不能到 `done`」的完整链路，而不是只跑单元测试。**
+R10 / R12 都是「纯函数层满分、工具层能推到 `done` 而用户代码是 `[]`」。这一轮我按 §16 的口径，把 R10 / R12 的验证都写成了**走状态机的脚本**（`declare → run → done`、`scaffold → do → done`），而不是只断言 `doneCard` 的返回值——只有这样才看得见「它其实还是能过」。
