@@ -1,6 +1,7 @@
 # lib/state.js 对抗性审查（红队报告）
 
-- 审查对象：`lib/state.js`（631 行，工作树当前版本；同批相关文件 `lib/cards.js` / `lib/tools.js` 只在定位根因时引用，不在审查范围内）
+- 审查对象：`lib/state.js`，**基线 = commit `65ad526` 的 631 行版本**（同批相关文件 `lib/cards.js` / `lib/tools.js` 只在定位根因时引用，不在审查范围内）
+- 复现基线：如果你看到的 `lib/state.js` 已经不是 631 行（说明有人在本报告之后动手修了），用 `git show 65ad526:lib/state.js` 取回基线，否则行号会对不上
 - 判决依据：`docs/CONTRACT.md`（§1 导出面 / §2 事件表 / §3 payload / §4 state 形状 / §5 错误消息）；冲突时以契约为准
 - 方法：不读测试断言什么，只找**测试没断言到**的路径；每条结论都跑过真实代码（`node` 直接 import `lib/*.js`，关键项经 `tools.js` 走完整「加载 → 推进 → 落盘 → 重渲染」路径，用的都是真文件）
 - **本报告未改动任何源文件**。`lib/state.js` 不在我的写作用域，我只输出结论。
@@ -535,3 +536,215 @@ node $env:TEMP\repro-review-state.mjs
 ---
 
 *本报告只写结论，未修改 `lib/state.js`、`lib/cards.js`、`lib/tools.js` 或任何其它源文件。审查期间仓库工作树唯一的改动就是新增了本文件。*
+
+---
+
+## 7. 修复记录（Lead 收到报告后同一轮内完成）
+
+原始报告一字未改，下面是逐条处置。回归测试在 `test/review-state.test.js`（26 条），用例名以 F 编号开头。
+修完 `node --test` 从 291 条涨到 316 条，全绿。
+
+| # | 处置 | 落在哪 |
+|---|---|---|
+| F1 | **已修**。`upgradeFromV0` 增加容器内部体检：`tech.items` / `cards` / `clarify.answers` / `decision.history` 逐元素过滤非对象，`idea` 的四个字符串数组过滤非字符串，`terminal` 校验 kind，`projectId` 缺失时重新生成 | `lib/state.js` |
+| F2 | **已修**。`upgradeFromV0` 里 `merged.budget = resolveBudget(merged.budget)`，字符串预算归一化成数字，50 条 user 项现在会被拦 | `lib/state.js` |
+| F3 | **已修**。`validateChooseBuild` / `validateTechOk` 增加 id 唯一性检查，报错带上重复的 id | `lib/state.js` |
+| F4 | **已修**。`revise` 分支重置 `verify`，`effects.rerender` 补上 `VERIFY.md`（否则旧假设会留在产物里） | `lib/state.js` |
+| F5 | **已修，两道防线**。`state.js` 侧 `isSafeId` 正则 `^[A-Za-z0-9_-]{1,40}$`（card id 与 tech id 都查）；`tools.js` 侧 `writeText` 加 `path.resolve` 边界断言，防止将来别的调用点漏掉正则 | `lib/state.js`、`lib/tools.js` |
+| F6 | **已修**（与 F3 同一处） | `lib/state.js` |
+| F7 | **已修**。两处 `- 6` 改成 `- [...'plando：'].length`（=7），不再硬编码 | `lib/state.js`、`lib/cards.js` |
+| F8 | **已修**。提示改成「先传 revise（带 reason）回 tech 补技术项，再 tech_ok」，并有用例真的走这条逃生口 | `lib/state.js` |
+| F9 | **已修**。`isNonEmptyString` 与 `checkDoneObservable` 都先剥零宽字符（`\u200B-\u200D\u2060\uFEFF\u180E\u3164`）再判定 | `lib/state.js` |
+| F10 | **已修**。新增导出 `inspectShape(state)`（CONTRACT §1.1 已补），`project.loadState` 在返回 `ok:true` 前跑一次；坏了报错并指出字段路径，**不改写原文件** | `lib/state.js`、`lib/project.js`、`docs/CONTRACT.md` |
+| F11 | **已修**。`upgradeFromV0` 里 `tech.size` 不是 small/large 时用 `computeSize` 重算 | `lib/state.js` |
+| F12 | **已修**。`format.nextActionFor(stage, state)` 在 decide + large + 未验证时返回 verify 专项推荐；导出后 `tools.js` 的「下一步」也改用它，不再绕过特判 | `lib/format.js`、`lib/tools.js` |
+| F13 | **已修**。`upgradeFromV0` 里 `merged.paused = merged.paused === true` | `lib/state.js` |
+| F14 | **已修**。`reopen` 也重置 `verify`（与 F4 同一根因） | `lib/state.js` |
+| F15 | **未动**。写两次 `terminal` 结果正确，只是 `nowIso()` 多调一次；清理它要动 drop 分支，收益为零、风险非零 | — |
+
+关于报告里那条「行为空档」（`paused=true` 时状态机照样允许推进）：**确认是契约没写清，不是 bug**。
+本版语义是「暂停 = 守卫层提示先 resume，不冻结状态机」——冻结会让用户连「暂停前的最后一件事」都记不下来。
+这条已补进 `docs/CONTRACT.md` §2 的 `pause` 说明。
+
+报告 §3「查过但不是 bug」那张表保留，尤其 `structuredClone` 那条：它是「不可变风格没被破坏」的正面证据，
+下一次改动状态机的人应该在动 payload 相关代码前读一遍。
+
+另外顺手补了一处报告没提但同一性质的问题：`tools.js` 的 `fail()` 在 why 已是完整 `plando：…——下一步：…` 形状时会**再包一层**，
+产出两个前缀、两个「下一步」（`plando_card` 对 todo 卡直接 done 就能看到）。已改成原样透传，并加了回归断言。
+
+---
+
+## 8. 修复验收（审查者本人复核，不复用 Lead 的结论）
+
+我把上面每一条都按「坏输入」重跑了一遍。**13 条确认闭合**（F1/F2/F3/F4/F6/F7/F8/F9/F10/F11/F12/F13 + F5 的 payload 面），
+`node --test` 316 条全绿、`node scripts/check-docs.mjs` 通过。下面是**没修干净或引入新问题**的部分，每条都附实测。
+
+### R1（高，未闭合）F5 只堵了 payload 入口，磁盘上的坏 id 依然能覆盖项目文件
+
+`isSafeId` 只在 `validateChooseBuild` / `validateTechOk` 里跑（`state.js:301`、`:263`）——那是**新写入**的路径。
+`upgradeFromV0` 对已有 cards 只 `filter(isPlainObject)`（`state.js:637`），`inspectShape` 也只查「是不是对象」，**不查 id 格式**。所以：
+
+```js
+// 项目里放一个用户自己的 README.md
+// .plando/state.json（v0）：
+{ schemaVersion: 0, stage: 'build',
+  cards: [{ id: '../../README', techIds: ['t1'], title: '覆盖README', status: 'todo' }], … }
+```
+
+```
+loadState -> true（迁移放行，inspectShape 返回 []）
+plando_card { action: 'start', id: '../../README' }
+  -> 卡片 ../../README 已 start。
+README.md 前 = "# 用户自己写的 README"
+README.md 后 = "# 覆盖README"
+用户的 README 被永久覆盖 = true
+```
+
+关键一点：`writeText` 的边界断言（`tools.js:154`）**挡不住这一击**，因为
+`path.join('.plando','cards','../../README.md')` = `README.md`——它**在项目目录内**，断言合法通过。
+F5c（写穿项目目录）确实闭合了，但「项目内任意文件」这一半还开着。
+
+而且 `renderArtifacts` 只会重建 IDEA/TECH/VERIFY/HANDOFF/CHANGE-GUIDE/cards，**不会重建用户的 README.md**，覆盖是不可逆的。
+
+> 触发前提是「磁盘上已有坏 id 的 state」（v0 草稿或手改）。但这类文件的来源不止攻击者：修复前版本的 `choose_build`
+> 允许任意 id，所以**今天任何一个已存在的项目都可能带着中文/带点/带空格的 id**——见 R6。
+
+修法：`upgradeFromV0` 里把不合规的 `card.id` / `tech.id` 规范化（重名按 `c<n>` / `t<n>` 重排），而不是只过滤非对象；
+`inspectShape` 加一条「id 必须匹配 `CARD_ID_RE`」，让坏文件在读入时就停下而不是流到落盘。
+
+### R2（中，未闭合）`migrate` 的 v1 分支不跑 `inspectShape`，与 CONTRACT §1.1 明文冲突
+
+契约刚补的 line 60 写着：「`migrate` 必须在返回前也让它通过——否则坏 state 会被洗白成当前版本并写回磁盘」。实现是：
+
+```js
+// state.js:615
+if (version === SCHEMA_VERSION) return { ok: true, state: clone(state) };   // ← 没有体检
+```
+
+实测：
+
+```
+migrate({ ...v1, cards: [null] }).ok = true
+inspectShape 说 = ["cards 里有非对象元素"]
+```
+
+生产路径目前侥幸没事：`project.loadState` 在 v1 分支（不经过 `migrate`）自己跑了一次体检（`project.js:139`）。
+但契约要求的是 `migrate` 自己拦，且「直接调 `migrate`」是契约 §1.1 公开的导出行为——下一个调用方（比如将来的 `plando_recover`）就会漏。
+
+修法：`state.js:615` 改成 `const next = clone(state); const problems = inspectShape(next); return problems.length ? { ok: false, reason: … } : { ok: true, state: next };`
+
+### R3（中，未闭合）迁移路径从不复查预算，超预算项目能一路走到 build
+
+F2 修的是「预算字段被归一化成数字」，但**迁移从不调用 `checkBudget`**。预算只在 `tech_ok` 的 `validatePayload` 里跑一次，
+而迁移是绕过写入侧的另一条路（和 F10 同构）。v0 直接带着超预算清单时：
+
+```
+v0: tech.items = 50 条 owner=user × 99999 分钟，budget = {mustUnderstand:5, totalMinutes:600}
+迁移后 tech.size = large（F11 的修复生效了，这点是对的）
+choose_verify  -> ok
+verify_result  -> ok
+choose_build   -> ok        ← 预算门（5 条 / 600 分钟）在整条路径上一次都没跑过
+最终 stage=build  cards=50  总分钟=4999950
+```
+
+也就是说 **F11 反而帮它绕过了 F4 的门**：`size` 被正确重算成 `large`，于是模型按提示先做了 verify，验证一过门就没了，
+而真正该拦的预算从头到尾没检查。F2 修的「字段归一化」是对的，但只修了字段没修「这条路径上预算要不要跑」。
+
+修法：`upgradeFromV0` 里对 `tech.items` 跑一次 `checkBudget`，超了返回 `ok:false` + 让人回去砍清单。
+
+### R4（中，未闭合）`minutes` 是字符串时三处口径不一致（v0 / 手改路径）
+
+`computeSize` 用 `Number.isFinite(it.minutes)`（`state.js:596`），`artifacts.js` 用 `Number(item?.minutes)`（`:276`），
+`checkBudget` 用 `Number.isFinite`。三份实现三种宽容度：
+
+```
+minutes=500        computeSize.total=500  size=large  checkBudget=通过 | TECH.md: 总计 500 分钟 / 规模：大
+minutes="500"      computeSize.total=0    size=small  checkBudget=通过 | TECH.md: 总计 500 分钟 / 规模：小   ← 自相矛盾
+minutes=null       computeSize.total=0    size=small  checkBudget=通过 | TECH.md: 总计 0 分钟
+```
+
+`"500"` 这一行是真正的问题：**TECH.md 告诉模型「总计 500 分钟、规模小」**，而状态机算出来是 0 分钟、small，于是 large 门被跳过。
+这不是新增回归（基线同样如此），但 F2/F11 修完之后，它是「迁移后仍能骗过门」的最后一条残留路径。
+
+修法：迁移时逐项规范化 `minutes`（非正整数直接判坏，别默认 0）。
+
+### R5（中，未闭合）F14 只清了 state，没清产物；而且输出谎报「已重渲染」
+
+`revise` 现在确实重置了 `verify`，`effects.rerender` 也补上了 `VERIFY.md`（`state.js:531`）。但实测：
+
+```
+revise 输出：
+  已推进：build → tech（revise）
+  重渲染：IDEA.md、CHANGE-GUIDE.md、VERIFY.md     ← 说要渲染 VERIFY.md
+  落盘：IDEA.md、TECH.md、CHANGE-GUIDE.md、.plando/cards/c1.md   ← 实际没写 VERIFY.md
+state.verify = { hypothesis: '', result: null, … }（已清空，对的）
+磁盘 VERIFY.md 还在 = true，里面的假设 = 用户愿意每天记账这件事（旧的）
+```
+
+原因：`tools.js:468` 照 `effects.rerender` 打日志，而实际写不写由 `tools.js:319` 的
+`hasVerify = isNonEmptyString(state.verify.hypothesis)` 决定——hypothesis 已被清空，所以**跳过**。
+模型收到的信号是「VERIFY.md 重渲染了」，于是以为旧假设已经不在磁盘上。
+
+修法：`renderArtifacts` 在 `verify.hypothesis` 为空且文件已存在时删除或清空 `VERIFY.md`；
+或者把 `VERIFY.md` 从 `revise` 的 `effects.rerender` 里去掉，别声称做了没做的事。
+
+### R6（低，新引入）收紧 id 字符集会卡死修复前建的老项目
+
+新的 `isSafeId` 是 `/^[A-Za-z0-9_-]{1,40}$/`。修复前 `choose_build` 允许任意 id，所以存量项目里可能有中文 id：
+
+```
+v1 state 里 cards[0].id = "第一张卡"
+loadState -> ok（inspectShape 不查 id）
+plando_card start / done -> 正常（这两条走的是查 id 不是校验 id）
+revise -> ok    tech_ok -> ok
+choose_build 重传 "第一张卡" -> 拒绝：第 1 张卡的 id 只能用字母、数字、- 和 _，长度 1–40
+  → 老项目卡死在 decide，模型只能自己猜「换个 id」
+tech_ok 重传 id="技术1" 同样被拒
+```
+
+两条都是确定行为，不是猜测。契约 §3 目前**没有**写这个字符集（我搜过：`CONTRACT.md` 里没有 `A-Za-z0-9_-` 也没有「id 只能用」），
+所以这既是「实现新增了契约没写的约束」，也是「老数据兼容口子」。
+
+修法二选一：① 迁移时把不合规 id 规范化成 `c1..cn`（与 R1 是同一个修法，顺手一起做）；
+② 若要保留严格正则，就把字符集写进契约 §3，并在拒绝文案里给出「旧 id 不合规时怎么救」。
+
+### R7（观察）v0 里已有的重复 id 不会被去重，F3 的死锁对老项目仍然成立
+
+F3 的修复加在 `validateChooseBuild`（新建入口）。磁盘上已有的重复 id 照样通行：
+
+```
+v0 cards: c1:done(A) + c1:todo(B) → loadState ok，cards = "c1:done | c1:todo"
+cards_done -> 还有 1 张卡没收尾（c1）——先用 plando_card done 或 downgrade 收尾
+startCard('c1') -> 卡片 c1 现在是 done，不能重新开工
+```
+
+和报告里的 F3 死锁一模一样，只是入口换成了「老项目」。和 R1 同一个修法（迁移时去重）。
+
+### R8（观察）`applyEvent` 自身仍会把 `null` 变成原始 `TypeError`
+
+`state.js:513` 的 `cards.filter((c) => !['done','downgraded'].includes(c.status))` 没做 null 防御。
+`loadState` 现在拦在前面，生产路径不可达，但「最坏情况」的兜底只做在读取侧——任何绕过 `loadState` 的调用方（测试、将来的工具）都会踩到。
+不阻塞发布，记一笔。
+
+### R9（观察）回归测试没盖住上面这些
+
+`test/review-state.test.js` 26 条用例覆盖了 F1–F14 的**新写入路径**，但：
+
+- 没有一条测「迁移后的 id 不合规」或「迁移后重复 id」（R1/R6/R7）
+- 没有一条测「迁移后预算要不要复查」（R3）——`F2 迁移后的预算真的会拦` 测的是重新 `tech_ok`，不是迁移后直接 `choose_build`
+- 没有一条断言 `VERIFY.md` 这个文件名（`VERIFY.md` 在该文件里出现 **0** 次），所以 R5 全程无人发现
+- 没有一条测 `migrate` 的 v1 分支体检（R2）
+
+建议补 5 条：迁移后带穿越 id 拒载、迁移后重复 id 去重、迁移后超预算拒载、`revise` 后 `VERIFY.md` 不含旧假设、`migrate(v1 + 坏形状)` 返回 `ok:false`。
+
+### 结论
+
+**修复方向全部正确，13/15 闭合，但 F5 只关了一半的门、F14 只改了 state 没改产物，另有 3 条契约/兼容性新增问题。**
+按原来的发布判据（「正常路径上能不能失守」），现在的状态是：
+
+- **仍会失守**：R1（磁盘坏 id → 覆盖项目内文件，不可逆）、R3（迁移绕过预算 → 超预算项目能进 build）
+- **仍不一致**：R5（输出说渲染了、实际没渲染）、R2（契约要求 migrate 体检、实现没做）
+- **新增兼容风险**：R6（老项目中/英 id 被新正则卡死）
+
+这 4 条都很小（迁移函数里几行 + `renderArtifacts` 一处 + `migrate` 一处），建议与 0.1.0 一起发，别留给 0.1.1——
+R1 和 R3 都会造成不可逆后果，而它们的触发前提（存量 v0/v1 文件）恰好是发布后最先出现的东西。
