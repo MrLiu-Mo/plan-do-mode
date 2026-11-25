@@ -1,9 +1,5 @@
 # plan-do 模式：把一个小想法「学会并做出来」的 DSH 模式
 
-> 状态：方案已定稿，尚未开工（0 行代码）
-> 日期：2026-11-25
-> 下一步：确认命名与安装方式后，按第八节 9 个步骤实施
-
 ## 一、目标与验收标准
 
 **目标**：在 `A:\AI\plan-do-mode` 做一个独立的 DSH 模式（agent preset + Host 插件 + 守卫），把用户的 8 步流程落成有硬约束的状态机，并修正上一轮指出的缺口。核心承诺三条：
@@ -23,6 +19,8 @@
 | A5 | 全链路跑得通 | 冒烟工作区走完：灵感→澄清→IDEA→TECH→选路→卡→收尾，产物文件齐全 |
 | A6 | 产物可追踪 | 每次推进在项目仓库里产生一次只含模式产物的 commit |
 | A7 | glim 不受影响 | `A:\AI\glim` 无任何改动 |
+| A8 | 分发包完整 | `npm pack --dry-run --json` 的清单覆盖 `lib/` 全部模块 + `cordis.patch.yml` + 两个 locale + `icon.svg`；缺一个即失败 |
+| A9 | 从 tgz 装得上、卸得干净 | `dsh plugin --profile desktop add -w <tgz>` 后「边学边做」可选中；卸载后 preset 消失，`~/.plando` 与项目 `.plando/` 保留 |
 
 ---
 
@@ -30,10 +28,13 @@
 
 ```
 A:\AI\plan-do-mode\
-├─ package.json            # @local/plan-do-mode，dsh.bundle.patch
+├─ package.json            # dsh-plan-do，dsh.bundle.patch + files/exports 白名单
 ├─ cordis.patch.yml        # 插入 preset-plan-do（persona 提示词 + 插件清单）
 ├─ icon.svg                # 原创图标
-├─ locale/en.json zh.json  # meta.title / meta.description
+├─ locale/en.json zh.json  # meta.title / meta.description（双语，市场索引要用）
+├─ LICENSE                 # MIT
+├─ scripts/verify-pack.mjs # 断言 npm pack 清单完整（零依赖）
+├─ .github/workflows/test.yml # CI：node --test + verify-pack
 ├─ lib/
 │  ├─ index.js             # apply(ctx, config)：注册 8 个工具 + 守卫
 │  ├─ config.js            # 零依赖配置校验（dataRoot / budget / defaultProjectDir）
@@ -53,7 +54,9 @@ A:\AI\plan-do-mode\
 └─ README.md
 ```
 
-**硬约束：零依赖。** 只 import `node:` 内置模块和本目录文件。原因已由 glim-mode 实测：`install_bundle` 用 `link:` 链入 profile，被链目录没有自己的 `node_modules`，`@deepseek-ai/*` 裸包名解析必失败。因此工具用裸 `ToolDefinition` 对象（`parameters` 用原始 JSON Schema，`output: { schema:{type:'string'}, render }`），配置手工校验。
+**硬约束：零依赖。** 只 import `node:` 内置模块和本目录文件。因此工具用裸 `ToolDefinition` 对象（`parameters` 用原始 JSON Schema，`output: { schema:{type:'string'}, render }`），配置手工校验。
+
+理由（**已修正**，见第十节）：`link:` 安装解析不到裸包名，只对开发期的 `install_bundle` 成立；npm / GitHub / tgz 安装会把包真实装进 profile 的 `node_modules`，`@deepseek-ai/*` 是能解析的（`dsh-prompt-rewriter` 就把 `@deepseek-ai/schemastery` 写成真实 dependency）。零依赖仍然保留，理由是「四种安装形态都起得来 + 不锁 DSH 内部包版本 + 守卫可审计」，不是「不分发就没法用」。代价：插件页没有配置表单，配置只能写在 `cordis.patch.yml` 里。
 
 ---
 
@@ -88,11 +91,13 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 |---|---|---|
 | 灵感库 | `<dataRoot>/ideas.json` | 全局，跨项目；`dataRoot` 默认 `~/.plando` |
 | 项目索引 | `<dataRoot>/projects.json` | `projectDir → projectId` |
-| 机器状态 | `<projectDir>/.plando/state.json` | 唯一真相源，产物由它渲染 |
+| 机器状态 | `<projectDir>/.plando/state.json` | 唯一真相源，产物由它渲染；带 `schemaVersion` |
 | 日志 | `<projectDir>/.plando/log.jsonl` | 每次推进/拒绝/降级留痕 |
 | 检查清单 | `<projectDir>/.plando/checks.json` | 卡声明的可执行检查 |
 | 卡片正文 | `<projectDir>/.plando/cards/<id>.md` | 人读副本 |
 | 人读产物 | `<projectDir>/IDEA.md`、`TECH.md`、`HANDOFF.md`、`CHANGE-GUIDE.md` | 放在项目根，随项目 git 追踪 |
+
+**写盘规则（分发包必需）**：所有 json 用「写临时文件 + `rename`」原子替换——多会话共享 `state.json`，半写文件比报错更糟。读到**已知的旧** `schemaVersion` 走 `migrate()` 升到当前版本后写回；只有**解析失败或版本未知**才报错停止，绝不静默重置。
 
 ### IDEA.md（渲染，结构校验）
 
@@ -128,7 +133,9 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 
 **结构性**（第一道）：预设不挂 `bash/pwsh/terminal/run_code/subagent/subagent_fork/workflow`；`dsh-tool-fs` 配 `write:false, edit:false`。模型根本看不到写文件工具。
 
-**守卫**（第二道，`ctx.tools.guard()`，同步单调）：对 `write/edit/str_replace_editor/apply_patch/bash*/pwsh*/terminal*/run_code/subagent*/workflow` 一律拒绝，理由里写明「现在在哪个阶段、下一步做什么」。状态读不出来时：写类工具**失败即拒**（fail-closed），只读工具放行。`plando_*` 不拦（自带阶段校验）。
+**守卫**（第二道，`ctx.tools.guard()`，同步单调）：拒绝一切「能改变世界」的工具，理由里写明「现在在哪个阶段、下一步做什么」。状态读不出来时：写类工具**失败即拒**（fail-closed），只读工具放行。`plando_*` 不拦（自带阶段校验）。
+
+拒绝名单**按能力列、不按记忆列**（名单在 `policy.js`，每条都有测试）：文件写（`write` / `edit` / `str_replace_editor` / `apply_patch`）、命令执行（`bash*` / `pwsh*` / `terminal*` / `shell*`）、动态代码（`run_code` / `code_interpreter` / `notebook*` / `eval*`）、委派（`subagent*` / `workflow` / `task`）。前缀匹配覆盖带后缀的变体；`config.guardExtraDeny` 允许用户追加工具名。这条名单与市场索引的能力词表对齐（`fs-write` / `shell` / `dynamic-code` / `subagent`），避免出现「市场标了能力、守卫却没拦」的缺口。
 
 **配置/脚手架**（唯一例外）：`plando_scaffold` 按文件名白名单放行（`package.json`、`tsconfig*.json`、`*.config.{js,ts,mjs,cjs}`、`.gitignore`、`.env.example`、`Dockerfile`、`docker-compose*.yml`、`requirements.txt`、`pyproject.toml`、`Makefile`、`.editorconfig`、`.github/workflows/*.yml`），且必须对应 `归属=ai` 的 TECH 项。
 
@@ -159,9 +166,18 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 
 ---
 
-## 七、自动提交（满足 AGENTS.md 的每次改动都提交）
+## 七、自动提交（默认关闭）
 
-每次成功推进/写产物后：`git add -- IDEA.md TECH.md HANDOFF.md CHANGE-GUIDE.md .plando` → 有暂存才 `git commit -m "plando(<stage>): <event>"`。**绝不 `git add -A`**，不碰用户正在写的代码。项目不是 git 仓库时跳过并提示，不报错。
+**分发包不能在陌生人的仓库里默认写 git**：会撞上 hooks、签名、并发会话，以及用户正在改的代码。所以 `autoCommit` **默认 `false`**，需要时在 `cordis.patch.yml` 里显式打开：
+
+```yaml
+- id: plan-do-mode
+  config: { autoCommit: true }
+```
+
+打开后，每次成功推进/写产物：`git add -- IDEA.md TECH.md HANDOFF.md CHANGE-GUIDE.md .plando` → 有暂存才 `git commit -m "plando(<stage>): <event>"`。**绝不 `git add -A`**，不碰用户正在写的代码；commit 正文带 `plan-do-mode` 标识便于识别与回滚。项目不是 git 仓库时跳过并提示一次，不报错。
+
+> 本仓库自己的开发仍按 AGENTS.md 每次改动提交——那是**开发流程**的要求，不是插件对用户仓库的默认行为。
 
 ---
 
@@ -175,7 +191,8 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 6. **policy.js + tools.js + index.js + 测试**：守卫规则、8 个工具、`apply()` 用假 ctx 跑通；零依赖导入 + 静态禁止裸包名。
 7. **cordis.patch.yml + 提示词**：写预设与 persona 文本。
 8. **docs/PROTOCOL.md + docs/INSTALL.md**：人读流程与安装/冒烟清单。
-9. **全量验证**：`node --test` 全绿 → 提交。
+9. **分发包**：`LICENSE`、`files`/`exports` 白名单、`scripts/verify-pack.mjs`（断言 pack 清单完整）、`.github/workflows/test.yml`、README 的安装节（三条装法 + 卸载 + 能力说明）。
+10. **全量验证**：`node --test` 全绿 + `node scripts/verify-pack.mjs` 通过 → 提交。
 
 ---
 
@@ -188,36 +205,89 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
    - 记一条灵感 → 三问 pick → 澄清 → IDEA.md 生成 → TECH.md 生成（含预算拦截用例）→ 选路 → 一张卡（学/做/验）→ 收尾。
    - 负向验证：让 AI「直接帮我写这个文件」→ 必须被拒/工具不存在；`plando_scaffold` 写 `package.json` 成功、写 `src/app.js` 被拒。
    - 检查 `.plando/state.json`、各产物、commit 历史。
+4. **分发形态验证（A8 / A9）**：
+   - `npm pack --dry-run --json` → `node scripts/verify-pack.mjs` 断言清单完整。
+   - `npm pack` 出 tgz 后 `dsh plugin --profile desktop add -w "<tgz 绝对路径>"`，确认预设列表出现「边学边做」。
+   - 卸载（`dsh plugin remove` 或 `plugin_manager action=remove_bundle`）→ preset 消失、`~/.plando` 仍在。
 
-> 注：`plugin_manager` 不在当前会话工具集里，第 1–3 步需要你在创造模式会话里执行（或授权后由那边完成）；我这边能保证的是 A1（测试）与文件正确性。
+> 注：`plugin_manager` 不在当前会话工具集里，第 1–4 步需要你在创造模式会话里执行（或授权后由那边完成）；我这边能保证的是 A1（测试）、A8（pack 完整性）与文件正确性。
 
 ---
 
-## 十、边界情况与失败模式
+## 十、可分发的形态（npm 包 + GitHub Release tgz）
+
+**结论**：v1 以「一个 npm 包 + 一个 GitHub Release tgz」双通道分发；`install_bundle` 只用于开发期冒烟。这个生态已有成熟先例——索引 `awesome-dsh-plugin.com/plugins.json` 收录 1.3 万个插件，其中「模式类预设」已有多个（`dsh-preset-deep`、`dsh-free-mode`），形态与本项目同构：`dsh.bundle.patch` + 一个 `cordis.patch.yml`，没有 UI、不需要构建。
+
+### 10.1 三条装法
+
+```bash
+# ① npm（有版本号，可升级）
+dsh plugin --profile desktop add dsh-plan-do
+
+# ② GitHub Release tgz（不需要 npm 账号，国内网络更稳，推荐作主通道）
+dsh plugin --profile desktop add -w "https://github.com/<owner>/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz"
+
+# ③ 开发期本地目录
+plugin_manager action=install_bundle target=A:\AI\plan-do-mode
+```
+
+装完：新建会话的预设列表出现「边学边做」。卸载后 preset 消失，但 `~/.plando` 与项目 `.plando/` **保留**——卸载不删用户数据。
+
+### 10.2 包元数据（照 `dsh-preset-deep` / `dsh-team-control` 的既有惯例）
+
+- `"type": "module"`；`exports` 暴露 `.` / `./cordis.patch.yml` / `./locale/*.json` / `./icon` / `./package.json`
+- `"files"` 白名单：`lib/`、`cordis.patch.yml`、`locale/*.json`、`icon.svg`、`README.md`、`LICENSE`、`docs/`
+- `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`
+- `keywords: ["dsh-plugin","dsh-bundle","deepseek-harness","agent-preset"]`（索引靠它发现）
+- `license: "MIT"` + `repository` / `homepage` / `bugs` / `icon`
+- **不需要** `dsh.client`（v1 无 UI）、**不需要** `peerDependencies`（零依赖）
+
+### 10.3 零依赖保护不了的事：打包漏文件
+
+`files` 白名单漏一项（例如 `locale/zh.json`），本地 link 安装一切正常，别人装完却是空标题——这是分发特有的失败模式。所以 `scripts/verify-pack.mjs` 跑 `npm pack --dry-run --json`，断言清单包含 `lib/` 下每个模块、`cordis.patch.yml`、两个 locale、`icon.svg`，缺一个即失败（对应 A8）。
+
+### 10.4 与市场索引的关系（上架是后置项，但形态要提前对齐）
+
+- **双语描述**：索引里每个插件都有 `description.en` / `description.zh`，要写成「这是什么模式、和别的模式差在哪」。
+- **capabilities 由扫描得出，不认声明**：本包会被标 `shell`（`plando_check` 要执行命令）与 `fs-write`（`plando_scaffold`、写 `.plando/`）。README 必须主动说明：**「AI 不代写」是模式内部的硬约束，插件本身确有这两项能力**，否则上架后第一个质疑就是这一点。
+- 上架 = 向 `awesome-dsh-plugin/awesome-dsh-plugin` 提 PR；不是 v1 的验收项。
+
+### 10.5 仓库布局
+
+v1 包就在仓库根（`npm publish` 从根发，`github:owner/repo` 也要求根有 `package.json`），人读文档（IDEA.md / TECH.md / docs / PROTOCOL.md）与包共用一棵树，靠 `files` 白名单隔离发布内容。monorepo 子目录形态（`add github:owner/repo#dsh-plugin`，`dsh-team-control` 就是这么发的）留到 v2。
+
+## 十一、边界情况与失败模式
 
 | 情况 | 处理 |
 |---|---|
 | `dataRoot` 不存在/不可写 | 自动创建；失败时明确报错并给出路径 |
 | `.plando/state.json` 损坏 | 报错并停止，绝不静默重置（附 `schemaVersion` 与恢复建议） |
-| 项目不是 git 仓库 | 跳过自动提交，提示一次 |
+| `.plando/state.json` 是旧 schema | `migrate()` 升到当前版本后写回；迁移失败才报错 |
+| 同一文件并发写 | 临时文件 + `rename` 原子替换；读前重载，冲突以文件为准 |
+| 项目不是 git 仓库 | 跳过自动提交，提示一次（`autoCommit` 本就默认关闭） |
 | 同一项目多会话 | 共享同一 `state.json`；每次读写前重载，冲突以文件为准 |
 | 用户中途改需求 | `revise`：重渲染 IDEA.md、受影响卡标 `stale`、退回 tech |
 | 卡住/想跳过 | 提示分级 → 降级为 `ai` 并标「未掌握」，记录留痕 |
 | 验证超时 | 允许记录，但日志标 overtime 并在下次 status 提醒 |
 | 状态读不出时守卫 | 写类工具 fail-closed，只读放行 |
+| 预设 id 已被占用 | 装前检测 `preset-plan-do` 冲突，报错并给出改名指引，不覆盖 |
+| 卸载 / 重装 | preset 与工具消失，`~/.plando`、项目 `.plando/` 与已渲染产物保留 |
+| DSH 版本不兼容 | `apply()` 特性探测：拿不到 `ctx.tools.guard` 时降级为「无守卫」并显式警告，不崩溃 |
 
-## 十一、明确不做（本版）
+## 十二、明确不做（本版）
 
-- 不做 UI 徽章/侧栏卡片（C 档），阶段靠 `plando_status` 查看。
+- 不做 UI 徽章/侧栏卡片（C 档），阶段靠 `plando_status` 查看；因此也不需要 `dsh.client`。
 - 不改 `A:\AI\glim`，不复用其 core（避免跨仓库耦合）。
 - 不做多灵感并行分支（v1 一条灵感一个项目；分支留到 v2）。
 - 不接管 `todo_write`（不挂该工具，卡就是唯一清单）。
 - 不自动改写用户代码、不自动执行用户未声明的命令。
+- 不默认自动 commit（`autoCommit: false`，显式开启才提交）。
+- v1 不上架市场索引、不做 monorepo 子目录分发（形态对齐即可，见第十节）。
 
-## 十二、假设（若不成立请指出）
+## 十三、假设（若不成立请指出）
 
 1. DSH 版本为 0.2.1-rc.2，预设/守卫/`plugin_manager` 行为与官方文档一致；`ctx.tools.guard` 与 glim-mode 实测一致。
-2. 被 `link:` 安装的 bundle 解析不到 `@deepseek-ai/*` 裸包名（glim-mode 实测），因此零依赖是硬约束。
-3. 安装走 `plugin_manager install_bundle`，需创造模式会话（当前会话无该工具）。
+2. 零依赖的理由已修正为「跨安装形态与跨 DSH 版本稳定」：`link:` 安装确实解析不到 `@deepseek-ai/*`（glim-mode 实测），但 npm / GitHub / tgz 安装能解析（`dsh-prompt-rewriter` 实测有真实 dependency）。
+3. 分发命令 `dsh plugin --profile desktop add <npm 名 | github:owner/repo | -w <tgz>>` 与市场索引 `awesome-dsh-plugin.com/plugins.json` 里各插件 `install` 字段一致；本机 profile 名为 `desktop`。
 4. 你在编辑器里手写项目代码，AI 通过 `read/grep/glob` 与 `plando_check` 验收。
-5. 命名可按你偏好调整：预设 id `plan-do`、显示名「边学边做」、工具前缀 `plando_`、数据目录 `~/.plando`（都是一行改动）。
+5. 命名可按你偏好调整：包名 `dsh-plan-do`、预设 id `plan-do`、显示名「边学边做」、工具前缀 `plando_`、数据目录 `~/.plando`（都是一行改动）。
