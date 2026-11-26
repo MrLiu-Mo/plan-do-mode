@@ -131,6 +131,115 @@ plugin_manager action=remove_bundle target=dsh-plan-do
 
 **卸载不会删你的数据**：`~/.plando/` 和各项目的 `.plando/` 都还在。要清就自己删。
 
+## 5.5 A9 逐条走：装得上、卸得干净
+
+A9 是**唯一没法自动化**的验收项（`scripts/smoke-pack.mjs` 只覆盖「包解开后能加载、能跑通
+init→clarify→idea」那半）。下面这 9 步按顺序做，每步都给了「该看到什么」——
+**看到的不一样就停下来，把原文贴回给我**，不要自己猜着往下走。
+
+> 用**本地 tgz** 装，不要用 `link:` 目录。tgz 是真正会发给别人的那个形状，
+> 它才验得了「`files` 白名单有没有漏文件」这件事；`link:` 指向仓库目录，永远看不出漏打包。
+
+### 5.5.1 准备（在仓库目录里，普通会话即可）
+
+```bash
+node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" pack
+```
+
+**该看到**：`dsh-plan-do-0.1.0.tgz`，约 137 kB，`npm notice total files: 28`。
+（`*.tgz` 在 `.gitignore` 里，不会污染仓库。）
+
+### 5.5.2 装（创造模式会话）
+
+```text
+plugin_manager action=install_bundle target=A:\AI\plan-do-mode\dsh-plan-do-0.1.0.tgz
+```
+
+**该看到**：成功回执，没有 `ERR_MODULE_NOT_FOUND` / `never started`。
+
+### 5.5.3 确认真的注册上了（创造模式会话）
+
+```text
+plugin_manager action=list_plugins
+```
+
+**该看到**：列表里有 `preset-plan-do`，状态**不是** `failed`。
+看不到、或状态是 `failed`，就是加载阶段挂了——最常见原因是包里漏了 `lib/` 某个模块。
+
+### 5.5.4 确认预设出现在选择器里（**新开**一个会话）
+
+新开一个会话 → 打开预设选择器。
+
+**该看到**：「边学边做」（id `plan-do`，排序 25）。
+**这一步是 A2 / A3 的判据**：`list_plugins` 里有、但选择器里没有，说明 preset 节点没插进去。
+
+### 5.5.5 确认「不代写」真的生效（在「边学边做」会话里）
+
+把工作区设成一个**空的临时目录**（不要用 `A:\AI\plan-do-mode`），然后：
+
+```text
+你：请用 write 工具在项目根写一个 hello.txt
+```
+
+**该看到**（两种都合格，说明不同但结论相同）：
+
+- 模型说「没有 write 工具」——预设没挂写工具，这是第一道防线；或
+- 出现 `plando：现在是「灵感收集」阶段，这个模式不允许写文件——下一步：…`——守卫拦住了，第二道防线。
+
+**不合格**：文件真的被写出来了。那是严重 bug，立刻停下贴回来。
+
+### 5.5.6 确认状态真的落盘（同一个会话）
+
+```text
+你：帮我记一个想法：做一个能导出 Markdown 的记账小工具
+```
+
+**该看到**：模型调 `plando_idea action=add`；`%USERPROFILE%\.plando\ideas.json` 出现这条记录。
+
+```powershell
+Get-Content "$env:USERPROFILE\.plando\ideas.json" -Encoding UTF8
+```
+
+### 5.5.7 记下卸载前的证据（为了 5.5.9 对比）
+
+```powershell
+Test-Path "$env:USERPROFILE\.plando\ideas.json"          # 该是 True
+Get-ChildItem "$env:USERPROFILE\.plando" | Select-Object Name
+```
+
+把输出**记下来或截图**——第 9 步要证明「卸载没删数据」。
+
+### 5.5.8 卸（回到创造模式会话）
+
+```text
+plugin_manager action=remove_bundle target=dsh-plan-do
+```
+
+**该看到**：成功回执。
+
+### 5.5.9 验卸载（三件事都要对）
+
+1. `plugin_manager action=list_plugins` → **没有** `preset-plan-do` 了。
+2. 再**新开**一个会话 → 预设选择器里**没有**「边学边做」了。
+3. 数据还在：
+
+```powershell
+Test-Path "$env:USERPROFILE\.plando\ideas.json"          # 仍是 True
+```
+
+**不合格**：第 3 步变 `False`。卸载删用户数据是严重 bug。
+
+### 5.5.10 把结果贴回来
+
+我需要这四项，其它细节不用：
+
+| 步骤 | 贴什么 |
+|---|---|
+| 5.5.2 / 5.5.3 | `install_bundle` 的回执 + `list_plugins` 里 `preset-plan-do` 那一行 |
+| 5.5.4 | 预设选择器里能不能看到「边学边做」（看得到 / 看不到） |
+| 5.5.5 | 那句拒绝的**原文** |
+| 5.5.9 | 三件事各自的结论 |
+
 ## 6. 开发者自查（改完代码之后）
 
 ```bash
