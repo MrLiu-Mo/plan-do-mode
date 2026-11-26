@@ -146,7 +146,7 @@ init→clarify→idea」那半）。下面这 9 步按顺序做，每步都给�
 node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" pack
 ```
 
-**该看到**：`dsh-plan-do-0.1.0.tgz`，约 137 kB，`npm notice total files: 28`。
+**该看到**：`dsh-plan-do-0.1.0.tgz`，约 146 kB，`npm notice total files: 28`。
 （`*.tgz` 在 `.gitignore` 里，不会污染仓库。）
 
 ### 5.5.2 装（创造模式会话）
