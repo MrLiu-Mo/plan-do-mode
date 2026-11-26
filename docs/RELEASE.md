@@ -124,6 +124,11 @@ curl.exe -sSL -o NUL -w "%{http_code}" `
 # 期望 200；私有仓库上是 404
 ```
 
+> v0.1.0 发布时就是这么处理的：先在私有状态下建好 release、传完附件、核对完校验和，
+> 确认一切正常后，最后一步才把仓库转 public（`PATCH /repos/{owner}/{repo}`，body
+> `{"private":false}`），转完再用**匿名** curl 验一次 200。先公开再发布也行，
+> 但那样任何中间失误都会落在公开视野里。
+
 **坑 4：删了 tag 再重推，Release 会自动变成 draft。** GitHub 发现 release 指向的 tag
 不存在时，不会报错、不会通知，只是把 `draft` 置成 `true`——于是 `releases/latest` 返回 404、
 公开页面上看不到这个版本，而 `releases` 列表接口里它还在。**给 tag 换 commit 之后必须确认

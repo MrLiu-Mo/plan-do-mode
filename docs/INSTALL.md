@@ -49,8 +49,11 @@ dsh plugin --profile <profile> add -w "https://github.com/MrLiu-Mo/plan-do-mode/
 plugin_manager action=install_bundle target=<tgz 的绝对路径>
 ```
 
-> **仓库还是私有的时候**，上面那条下载 URL 对未登录的人返回 **404**（不是 401）。
-> 要把包给外部使用，先把仓库转成 public，否则别人只会看到「找不到」。
+> **仓库已转 public，上面那条下载 URL 匿名可访问**（实测 200 + 149 kB + 校验和一致）。
+> 若哪天又改回 private，同一条 URL 会对未登录的人返回 **404（不是 401）**，别人只会看到
+> 「找不到」而看不出是权限问题。判据：
+> `curl -sSL -o NUL -w "%{http_code}" https://github.com/MrLiu-Mo/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz`
+> 应为 200。
 >
 > **tgz 的校验和只写在 Release 页面上，不写在这份文档里。** `docs/` 会打进 tgz，
 > 把包的校验和写进包内文档是自指的：改这行字 → 包就变了 → 校验和立刻失效。
