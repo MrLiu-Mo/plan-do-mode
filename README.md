@@ -29,6 +29,8 @@ plugin_manager action=list_plugins        # 确认 preset-plan-do 在，状态�
 
 ### ② GitHub Release 的 tgz（发布后给别人，不需要 npm 账号）
 
+**已经发布**：[Releases → v0.1.0](https://github.com/MrLiu-Mo/plan-do-mode/releases/tag/v0.1.0)
+
 ```bash
 # 下载后用本地文件装（--profile 是必填的，CLI 会报 required option）
 dsh plugin --profile <profile> add ./dsh-plan-do-0.1.0.tgz
@@ -36,6 +38,10 @@ dsh plugin --profile <profile> add ./dsh-plan-do-0.1.0.tgz
 # 或者直接给 URL
 dsh plugin --profile <profile> add -w "https://github.com/MrLiu-Mo/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz"
 ```
+
+> **前提：仓库得是 public。** 私有仓库上这条下载 URL 对未登录的人返回 **404**（不是 401），
+> 别人只会看到一句「找不到」。发布给外部使用前先把仓库转成 public。
+> 校验和：`c0f692897d51c931f590240405ea434a93153d8c974179317368a6f86265bc9e`（146 kB）。
 
 实测（2026-11-25，本机 pnpm 11）：`dsh plugin --profile <name> add <tgz>` 会把 `dsh-plan-do` 同时写进 `dependencies` 和 `dsh.profile.bundles`；`remove dsh-plan-do` 会两处一起清掉。装完同样是**新建会话 → 预设列表 → 「边学边做」**。
 

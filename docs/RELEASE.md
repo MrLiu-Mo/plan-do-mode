@@ -76,6 +76,54 @@ git push origin v0.1.0
 然后在仓库的 Releases 页面新建 release，tag 选 `v0.1.0`，把 `npm pack` 产出的
 `dsh-plan-do-0.1.0.tgz` 作为附件上传。
 
+#### 4.2.1 实测过的做法（2026-11-26，v0.1.0 真的这么发的）
+
+网页点选能用，但下面这条路可复现、可留档，下次照抄即可。两个坑都踩过：
+
+```powershell
+# 前置：github.com 直连不通，先挂代理；token 从 git credential 取（仓库是私有的，用同一个凭据）
+$env:HTTPS_PROXY='http://127.0.0.1:7890'; $env:HTTP_PROXY='http://127.0.0.1:7890'
+$tok = ("protocol=https`nhost=github.com`n`n" | git credential fill) -split "`n" |
+       Where-Object { $_ -like 'password=*' } | ForEach-Object { $_.Substring(9) }
+$h = @{ Authorization = "Bearer $tok"; 'User-Agent' = 'lead'; Accept = 'application/vnd.github+json' }
+
+# ① 建 release。body 必须从文件读成「纯字符串」——见下面坑 1
+$bodyText = [System.IO.File]::ReadAllText("$env:TEMP\release-notes.md", [System.Text.Encoding]::UTF8)
+$payload = @{ tag_name='v0.1.0'; target_commitish='main'; name='v0.1.0 · 边学边做';
+              body=[string]$bodyText; draft=$false; prerelease=$false }
+$json = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 3 -Compress))
+$rel = Invoke-RestMethod -Method Post -Headers $h -ContentType 'application/json; charset=utf-8' `
+         -Uri 'https://api.github.com/repos/MrLiu-Mo/plan-do-mode/releases' -Body $json
+
+# ② 传附件。**必须走 uploads.github.com**，走 api.github.com 会 404
+$bytes = [System.IO.File]::ReadAllBytes('dsh-plan-do-0.1.0.tgz')
+$up = @{ Authorization="Bearer $tok"; 'User-Agent'='lead'; 'Content-Type'='application/octet-stream' }
+Invoke-RestMethod -Method Post -Headers $up `
+  -Uri "https://uploads.github.com/repos/MrLiu-Mo/plan-do-mode/releases/$($rel.id)/assets?name=dsh-plan-do-0.1.0.tgz" `
+  -Body $bytes
+```
+
+**坑 1：`Get-Content -Raw` 的返回值不是一个纯字符串。** 它带着 `PSPath` / `PSParentPath` /
+`PSDrive` 等 NoteProperty，`ConvertTo-Json` 会把它们一起序列化，GitHub 直接回
+`422 Invalid request. For 'properties/body', {...} is not a string`——而且报错里会把整个
+Provider 对象（几千行）打出来，很难看出是这个问题。用 `[System.IO.File]::ReadAllText(...)`
+读，并显式 `[string]` 转一次。
+
+**坑 2：附件上传域名是 `uploads.github.com`。** `POST api.github.com/.../releases/{id}/assets`
+返回 404，看起来像 id 错了。下载则反过来：`api.github.com/.../releases/assets/{assetId}`
+带 `Accept: application/octet-stream` 能下（实测 200 + 149576 字节 + 校验和一致）。
+
+**坑 3（不是坑，是要先想清楚的一件事）：仓库是私有的时候，附件下载 URL 对未登录的人 404。**
+`https://github.com/<owner>/<repo>/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz` 这条
+URL 写在 README 和 Release 正文里，但**匿名请求会得到 404，而不是 401**——所以「给别人装」
+之前必须先把仓库转成 public，否则别人拿到的是一句 404，且看不出原因。发布时验证方式：
+
+```powershell
+curl.exe -sSL -o NUL -w "%{http_code}" `
+  'https://github.com/MrLiu-Mo/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz'
+# 期望 200；私有仓库上是 404
+```
+
 ### 4.3 两条通道的取舍
 
 | | npm | GitHub Release tgz |
