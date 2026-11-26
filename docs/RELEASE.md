@@ -45,7 +45,7 @@ node scripts/release-check.mjs
 ## 3. 四条验证全过
 
 ```bash
-node --test                     # 416 条，必须全绿
+node --test                     # 417 条，必须全绿
 node scripts/check-docs.mjs     # 文档交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 真打包 → 解开 → 真加载 → 跑一遍流程

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import {
   formatStatus, formatProjectList, formatIdeaList, formatCard,
-  formatTransition, formatCheck, formatRecover,
+  formatTransition, formatCheck, formatRecover, nextActionFor,
 } from '../lib/format.js';
 
 const lineCount = (s) => s.split('\n').length;
@@ -154,6 +154,29 @@ test('formatIdeaList：空 / 畸形输入不炸', () => {
     assert.ok(lineCount(out) <= 15);
   }
   assert.match(formatIdeaList([]), /灵感库是空的/);
+});
+
+// ---------------------------------------------------------------------------
+// nextActionFor
+// ---------------------------------------------------------------------------
+
+test('nextActionFor：decide + large 未验证时推荐 verify，且理由读起来不像命令', () => {
+  const out = nextActionFor('decide', { tech: { size: 'large' }, verify: { result: null } });
+  assertPlainText(out, 'nextActionFor');
+  assert.match(out, /choose_verify/, '要明确说下一步传哪个事件');
+  // 语气要求（用户反馈「生硬」）：给理由和预期收益，而不是「不许开工」这种禁令。
+  assert.match(out, /规模/, '要说明为什么建议先验证');
+  assert.doesNotMatch(out, /不许|禁止/, '不要再写禁令式措辞');
+  // 验证过之后就不再特判，回到普通「三选一」提示（那时三选一里本来也会提到 choose_verify）。
+  const after = nextActionFor('decide', { tech: { size: 'large' }, verify: { result: 'pass' } });
+  assert.doesNotMatch(after, /小验证/);
+  // small 项目同样不该被特判。
+  assert.doesNotMatch(nextActionFor('decide', { tech: { size: 'small' }, verify: { result: null } }), /小验证/);
+  // 脏输入不炸。
+  for (const bad of [undefined, null, {}, 'decide']) {
+    assertPlainText(nextActionFor(bad, undefined), 'nextActionFor 畸形');
+    assertPlainText(nextActionFor(bad, 'x'), 'nextActionFor 畸形 state');
+  }
 });
 
 // ---------------------------------------------------------------------------
