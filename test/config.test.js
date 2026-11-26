@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readConfig, DEFAULT_BUDGET } from '../lib/config.js';
+import { readConfig, DEFAULT_BUDGET, DEFAULT_SIZE_THRESHOLD_MINUTES } from '../lib/config.js';
+import { computeSize } from '../lib/state.js';
 
 test('缺省配置：dataRoot 落在 ~/.plando，budget 用契约默认值', () => {
   const cfg = readConfig({});
@@ -91,6 +92,31 @@ test('非法 guardExtraDeny：不是数组 / 含非字符串', () => {
 
 test('非法 dataRoot 类型抛错', () => {
   assert.throws(() => readConfig({ dataRoot: 123 }), /dataRoot/);
+});
+
+// --- sizeThresholdMinutes：默认 300、可覆盖、非法要炸 ------------------------
+
+test('sizeThresholdMinutes 默认 300，且与 state.js 的默认值一致', () => {
+  assert.equal(readConfig({}).sizeThresholdMinutes, 300);
+  assert.equal(readConfig().sizeThresholdMinutes, DEFAULT_SIZE_THRESHOLD_MINUTES);
+  // 两处常量必须相等：state.js 零 import（不能反向依赖 config.js），只能靠测试钉住。
+  assert.equal(computeSize([{ id: 't1', minutes: 301 }], {}).size, 'large');
+  assert.equal(computeSize([{ id: 't1', minutes: 300 }], {}).size, 'small');
+});
+
+test('sizeThresholdMinutes 可覆盖', () => {
+  assert.equal(readConfig({ sizeThresholdMinutes: 120 }).sizeThresholdMinutes, 120);
+  assert.equal(readConfig({ sizeThresholdMinutes: 1 }).sizeThresholdMinutes, 1);
+});
+
+test('非法 sizeThresholdMinutes（0 / 负数 / 小数 / 字符串）各抛中文错误', () => {
+  for (const bad of [0, -1, 1.5, '300']) {
+    assert.throws(() => readConfig({ sizeThresholdMinutes: bad }), (err) => {
+      assert.ok(err.message.startsWith('plando：配置'), `实际是：${err.message}`);
+      assert.match(err.message, /sizeThresholdMinutes/);
+      return true;
+    }, `sizeThresholdMinutes=${JSON.stringify(bad)} 应该抛错`);
+  }
 });
 
 test('整体不是对象时抛错', () => {

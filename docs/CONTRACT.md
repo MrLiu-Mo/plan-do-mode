@@ -145,11 +145,29 @@ PLAN 里 `pick`/`drop` 同时出现在 `plando_idea` 的 action 和状态机的�
   ifMissing: string,   // 不会怎样错 / 影响哪个判断
   owner: 'user' | 'follow' | 'ai',
   difficulty: 1 | 2 | 3,
-  minutes: number,     // 预计分钟，正整数
+  minutes: number,     // 用户亲手敲并跑通的时间，正整数（见下「minutes 的口径」）
   judge: string,       // 过关判据（可判定）
   file: string,        // 落在哪个文件
 }
 ```
+
+**`minutes` 的口径（这决定了规模判定准不准）**
+
+`minutes` 是**用户亲手敲这段代码、并把它跑通**的时间。**不含**学概念、查文档、看教程、
+调环境、搜报错的时间——那些是这个模式本身负责交付的部分，不该记进「这项要花多久」。
+
+估时按下面的锚点，不要往上加：
+
+| 这一项要做的事 | minutes |
+| --- | --- |
+| 读一个文件、把内容打印出来 | 5–15 |
+| 改一个已有函数的一处 | 15–30 |
+| 新写一个函数并跑通 | 20–45 |
+| 新写一个页面 / 一个接口 | 45–90 |
+| 接一个现成库并跑通 | 30–60 |
+
+单项超过 90 分钟，说明它不该是一项，先拆开再提交。这是估时口径，不是校验规则——
+插件只校验「正整数」，是否正确只有 TECH.md 读起来像不像这回事。
 
 预算校验（来自 `config.budget`，默认 `{ mustUnderstand: 5, totalMinutes: 600 }`）：
 
@@ -161,12 +179,18 @@ PLAN 里 `pick`/`drop` 同时出现在 `plando_idea` 的 action 和状态机的�
 - `choose_build` 会再跑一次预算校验：`tech_ok` 的校验被绕过时（存量 v0 迁移、手改 state）
   这里就是最后一道门。
 
-规模判定：
+规模判定（阈值来自 `config.sizeThresholdMinutes`，默认 **300**）：
 
 ```js
-size = (totalMinutes > 180 || constraints.promiseRisk === true) ? 'large' : 'small'
-sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk ? '承诺风险' : '')
+limit      = state.tech.threshold ?? config.sizeThresholdMinutes ?? 300   // 立项时快照进 state
+size       = (totalMinutes > limit || constraints.promiseRisk === true) ? 'large' : 'small'
+sizeReason = totalMinutes > limit ? `预计 ${totalMinutes} 分钟，超过 ${limit} 分钟阈值`
+           : promiseRisk ? '承诺风险' : ''
 ```
+
+`size=large` 时 `decide` 的推荐必须是 `verify`（先做时间盒小验证再动手）。**阈值是可配的**：
+阈值调低 = 更容易被要求先验证，调高 = 更多项目直接动手。立项后阈值固定在
+`state.tech.threshold`，改配置不会改判已有项目（与 `budget` 同一套路）。
 
 ### choose_verify / choose_build / verify_result / ship_pass
 
@@ -201,7 +225,7 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
   idea: { id, title, oneLine, users, mvp: string[], acceptance: string[], notDo: string[], assumptions: string[], constraints: object },
   baseline: { experience, hoursPerWeek, goal },
   clarify: { rounds: number, answers: object[], open: string[] },
-  tech: { items: TechItem[], size: 'small'|'large', sizeReason: string },
+  tech: { items: TechItem[], size: 'small'|'large', sizeReason: string, threshold: number },
   decision: { choice: 'verify'|'build'|'handoff'|null, history: [{choice, at}] },
   verify: { hypothesis, method, timeboxMin, judge, result, evidence, overtime: boolean },
   cards: Card[],
@@ -212,6 +236,8 @@ sizeReason = totalMinutes > 180 ? `预计 ${totalMinutes} 分钟` : (promiseRisk
 
 **`budget` 是 state 快照**（契约补充）：`config.budget` 只在创建项目时读一次，写进 `state.budget`；
 之后所有渲染与校验都读 `state.budget`，这样产物不会因为用户改配置而前后不一致。
+**`tech.threshold` 同理**：`config.sizeThresholdMinutes`（默认 300）在立项时快照进来，
+`tech_ok` 判定规模、`TECH.md` 渲染都读它；老项目没有这个字段时退回当前配置、再退回 300。
 `terminal.reason` 在 `ship_pass` / `choose_handoff` 这类没有 reason payload 的事件里写 `''`。
 
 ```js

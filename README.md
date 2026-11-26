@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 已完成，验收 A1–A9 全部通过（A9 于 2026-11-26 真装一次验过）。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 405 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
+**v0.1.0 已完成，验收 A1–A9 全部通过（A9 于 2026-11-26 真装一次验过）。** `cordis.patch.yml`（预设 + 人格提示词）、`lib/` 下 12 个模块（状态机 / 产物 / 项目 / 卡片 / 检查 / 脚手架 / 守卫 / 8 个工具 / 入口）与 416 条测试均已就位；流程说明看 [docs/PROTOCOL.md](docs/PROTOCOL.md)，装/卸与冒烟看 [docs/INSTALL.md](docs/INSTALL.md)，第一次上手看 [docs/START-HERE.md](docs/START-HERE.md)。进度与逐轮计划见 [docs/DEV-PROMPTS.md](docs/DEV-PROMPTS.md)。
 
 > A9 第一次真装时抓到过一个真 bug：`lib/index.js` 里的 `export default apply` 让
 > `cordis-plugin-loader` 丢掉命名 `inject`，插件显示「加载失败」。修法与「为什么四条验证都没拦住」
@@ -102,6 +102,7 @@ plugin_manager action=remove_bundle
 | `dataRoot` | `~/.plando` | 灵感库与项目索引的根目录，留空用默认值 |
 | `autoCommit` | `false` | 打开后只提交模式产物（绝不 `git add -A`） |
 | `budget` | `{ mustUnderstand: 5, totalMinutes: 600 }` | `归属=user` 的条目数与总时长上限 |
+| `sizeThresholdMinutes` | `300` | 总预计分钟超过它就判「大项目」，此时 `decide` 会推荐先做时间盒小验证；立项时快照进 `state.tech.threshold`，改配置不影响已有项目 |
 | `guardExtraDeny` | `[]` | 额外要拦的工具名（前缀匹配带后缀的变体） |
 
 ## 能力说明（请先读这一节再评估安全性）

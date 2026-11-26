@@ -95,14 +95,28 @@ test('tech_ok：预算超限被拒（validatePayload 与 applyEvent 都拦）', 
   assert.match(a.reason, /预算/);
 });
 
-// --- computeSize：>180 分钟或 promiseRisk 判 large ------------------------
+// --- computeSize：超过阈值（默认 300）或 promiseRisk 判 large -----------------
 
-test('computeSize：180 分钟仍是 small，181 判 large 且 sizeReason 带分钟数', () => {
-  assert.deepEqual(computeSize([item({ minutes: 180 })], {}), { size: 'small', sizeReason: '', totalMinutes: 180 });
-  const r = computeSize([item({ minutes: 181 })], {});
+test('computeSize：默认阈值 300，300 分钟仍是 small，301 判 large 且理由带阈值', () => {
+  assert.deepEqual(computeSize([item({ minutes: 300 })], {}), { size: 'small', sizeReason: '', totalMinutes: 300 });
+  const r = computeSize([item({ minutes: 301 })], {});
   assert.equal(r.size, 'large');
-  assert.equal(r.totalMinutes, 181);
-  assert.match(r.sizeReason, /181 分钟/);
+  assert.equal(r.totalMinutes, 301);
+  // 理由必须同时给出「实际多少」和「阈值多少」，否则用户不知道为什么被判大。
+  assert.match(r.sizeReason, /301 分钟/);
+  assert.match(r.sizeReason, /300 分钟阈值/);
+});
+
+test('computeSize：阈值可由第三个参数覆盖（对应 config.sizeThresholdMinutes）', () => {
+  // 调低阈值：120 分钟就会判 large
+  assert.equal(computeSize([item({ minutes: 120 })], {}, 120).size, 'small');
+  assert.equal(computeSize([item({ minutes: 121 })], {}, 120).size, 'large');
+  // 调高阈值：500 分钟仍是 small
+  assert.equal(computeSize([item({ minutes: 500 })], {}, 800).size, 'small');
+  // 非法阈值退回默认 300
+  for (const bad of [0, -1, 1.5, '300', null, undefined]) {
+    assert.equal(computeSize([item({ minutes: 301 })], {}, bad).size, 'large', `阈值 ${JSON.stringify(bad)} 应退回默认`);
+  }
 });
 
 test('computeSize：constraints.promiseRisk === true 判 large，理由为「承诺风险」', () => {
@@ -116,9 +130,9 @@ test('computeSize：constraints.promiseRisk === true 判 large，理由为「承
 });
 
 test('computeSize：分钟超限与承诺风险同时成立时，理由优先给分钟数', () => {
-  const r = computeSize([item({ minutes: 200 })], { promiseRisk: true });
+  const r = computeSize([item({ minutes: 400 })], { promiseRisk: true });
   assert.equal(r.size, 'large');
-  assert.match(r.sizeReason, /200 分钟/);
+  assert.match(r.sizeReason, /400 分钟/);
 });
 
 test('computeSize：空清单返回 small / 0 分钟', () => {
@@ -126,7 +140,7 @@ test('computeSize：空清单返回 small / 0 分钟', () => {
   assert.deepEqual(computeSize(undefined, null), { size: 'small', sizeReason: '', totalMinutes: 0 });
 });
 
-// --- tech_ok 写回 size ----------------------------------------------------
+// --- tech_ok 写回 size / threshold ----------------------------------------
 
 test('tech_ok：提交后 state.tech.size / sizeReason 由 computeSize 决定', () => {
   const state = makeState({ stage: 'tech' });
@@ -134,11 +148,38 @@ test('tech_ok：提交后 state.tech.size / sizeReason 由 computeSize 决定', 
   assert.equal(small.ok, true);
   assert.equal(small.state.stage, 'decide');
   assert.equal(small.state.tech.size, 'small');
+  assert.equal(small.state.tech.threshold, 300, 'tech_ok 要把生效阈值快照进 state');
 
-  const large = applyEvent(state, 'tech_ok', { items: [item({ minutes: 200 })] }, CONFIG);
+  const large = applyEvent(state, 'tech_ok', { items: [item({ minutes: 400 })] }, CONFIG);
   assert.equal(large.ok, true);
   assert.equal(large.state.tech.size, 'large');
-  assert.match(large.state.tech.sizeReason, /200 分钟/);
+  assert.match(large.state.tech.sizeReason, /400 分钟/);
+});
+
+test('tech_ok：config.sizeThresholdMinutes 覆盖默认阈值，并写进快照', () => {
+  const state = makeState({ stage: 'tech' });
+  const cfg = { ...CONFIG, sizeThresholdMinutes: 120 };
+  const r = applyEvent(state, 'tech_ok', { items: [item({ minutes: 150 })] }, cfg);
+  assert.equal(r.ok, true);
+  assert.equal(r.state.tech.size, 'large', '阈值 120 时 150 分钟必须判大');
+  assert.equal(r.state.tech.threshold, 120);
+
+  // 同一个项目 revise 后重传清单：沿用已有快照，不被新配置改判
+  const revised = applyEvent({ ...r.state, stage: 'tech' }, 'tech_ok', { items: [item({ minutes: 150 })] }, { ...CONFIG, sizeThresholdMinutes: 800 });
+  assert.equal(revised.ok, true);
+  assert.equal(revised.state.tech.threshold, 120, 'revise 重传必须沿用已有阈值快照');
+  assert.equal(revised.state.tech.size, 'large');
+});
+
+test('createInitialState：传了 sizeThresholdMinutes 就落快照，没传/非法则留空由 tech_ok 取', () => {
+  // 真实路径是 initProject 从 readConfig 拿到（默认 300）再传进来，所以正常项目一定有快照。
+  assert.equal(createInitialState({ name: 'x', sizeThresholdMinutes: 500 }).tech.threshold, 500);
+  // 没传（单测、手写 state、老项目）就留 undefined：交给 tech_ok 按当时的 config 取一次，
+  // 而不是在这里悄悄钉成 300——否则「配置 500 但直接 createInitialState」会静默按 300 判。
+  assert.equal(createInitialState({ name: 'x' }).tech.threshold, undefined);
+  for (const bad of [0, -1, 1.5, '300']) {
+    assert.equal(createInitialState({ name: 'x', sizeThresholdMinutes: bad }).tech.threshold, undefined, `阈值 ${JSON.stringify(bad)}`);
+  }
 });
 
 test('tech_ok：id 由实现按位置分配 t1/t2，显式 id 沿用', () => {

@@ -88,7 +88,7 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 - **「完成」有定义**：`clarify_done` 必须带 `what / done / notDo` 三句 + 基线三项；`done` 是用户可观察现象，不是「功能都实现了」。
 - **基线前置**：`baseline = {experience, hoursPerWeek, goal: 'learn'|'ship'}`，决定 TECH 难度判定与预算。
 - **方法 1/2 合并**：不设「选方法」分支；每张卡固定 `学 → 做 → 验` 三段。
-- **规模与推荐**：`tech_ok` 时算 `size`：`totalMinutes > 180` 或 `promiseRisk=true` → `large`。`large` 时 `decide` 的推荐必须是 `verify`，且 `verify_result` 后**必须回 decide 重选**，不能直接进 build。
+- **规模与推荐**：`tech_ok` 时算 `size`：`totalMinutes > sizeThresholdMinutes`（默认 300，可配，立项时快照进 `state.tech.threshold`）或 `promiseRisk=true` → `large`。`minutes` 的口径是「用户亲手敲并跑通的时间」，不含学概念与调试。`large` 时 `decide` 的推荐必须是 `verify`，且 `verify_result` 后**必须回 decide 重选**，不能直接进 build。
 - **验证有时间盒与三出口**：`verify` 的 `timeboxMin ≤ 60`；结果 `pass|fail|inconclusive` 都回 decide，并各自给出默认建议。
 - **想法变更**：`revise` 需要 `reason`，重渲染 IDEA.md、把受影响卡标 `stale`、退回 tech。
 - **中断恢复**：`plando_project open` 读回 `<项目>/.plando/state.json`，`plando_status` 给出「上次到哪/下一步/未解问题/卡在哪」。
@@ -117,6 +117,7 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
 
 - `归属 ∈ {user, follow, ai}`：`user`=必须理解并自己写、`follow`=照步骤做、`ai`=可交给 AI。
 - **预算硬上限**：`归属=user` 条数 ≤ `budget.mustUnderstand`（默认 5），`Σ分钟 ≤ budget.totalMinutes`（默认 600）。超了 `tech_ok` 被拒，提示「拆里程碑或降级」，避免清单膨胀到让人放弃。
+- **`minutes` 口径**：用户亲手敲这段代码并跑通的时间，不含学概念、查文档、调环境、搜报错。锚点：读文件打印 5–15 / 改一处 15–30 / 新写一个函数 20–45 / 新写页面或接口 45–90 / 接库跑通 30–60；单项 >90 先拆开。
 
 ---
 
@@ -170,7 +171,7 @@ idea/tech/decide/build ──revise──▶ tech（作废受影响卡）
                   working-directory, compaction 组]
 ```
 
-- **persona.prefix** 承载模式人格与铁律（约 2–4KB）：阶段与出口、卡内三段、卡住协议（20 分钟 → 提示分级：指方向 / ≤5 行片段 / 完整答案并标「未掌握」）、每卡必停、反作弊（不猜阶段、不用「我先准备一下」绕过、不写模板套话、TECH 每条必须有判据）、语气。
+- **persona.prefix** 承载模式人格与铁律（约 2–4KB）：阶段与出口、卡内三段、讲卡固定 A/B/C/D 四段（本卡目标 / 知识点 / 本步应该做的 / 预期结果）、卡住协议（20 分钟 → 提示分级：指方向 / ≤5 行片段 / 完整答案并标「未掌握」）、每卡必停、估时口径（只算亲手敲并跑通）、反作弊（不猜阶段、不用「我先准备一下」绕过、不写模板套话、TECH 每条必须有判据）、语气（温和但不奉承）。
 - **不挂 plan-mode**：两套流程叠加会互相打架（glim-mode 已验证）。
 - 插件 `inject: ['tools']`，`workingDirectory` 用可选注入，拿不到时退回「由模型显式传 `dir`」。
 

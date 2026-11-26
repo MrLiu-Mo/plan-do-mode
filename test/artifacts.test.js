@@ -112,6 +112,7 @@ function makeState(overrides = {}) {
       ],
       size: 'small',
       sizeReason: '预计 110 分钟',
+      threshold: 300,
     },
     decision: { choice: null, history: [] },
     verify: {
@@ -257,6 +258,39 @@ test('renderTech：没有 TECH 项时仍产出可解析的结构', () => {
   const text = renderTech(state);
   assert.deepEqual(checkTechStructure(text), []);
   assert.match(text, /user 项 0 条 \/ 总计 0 分钟/);
+});
+
+test('renderTech：规模行同时给出总计分钟与阈值，大/小都要写', () => {
+  const small = mountTechSize({ size: 'small', sizeReason: '', total: 110, threshold: 300 });
+  assert.match(small, /规模：小（总计 110 分钟，阈值 300 分钟）/);
+
+  // 判大的理由已经在 sizeReason 里（computeSize 给的），渲染不能再自己拼一遍分钟数。
+  const large = mountTechSize({ size: 'large', sizeReason: '预计 310 分钟，超过 300 分钟阈值', total: 310, threshold: 300 });
+  assert.match(large, /规模：大（总计 310 分钟，阈值 300 分钟）——预计 310 分钟，超过 300 分钟阈值/);
+
+  // 阈值随 state.tech.threshold 走（立项快照），不是写死的 300。
+  const custom = mountTechSize({ size: 'large', sizeReason: 'x', total: 200, threshold: 150 });
+  assert.match(custom, /阈值 150 分钟/);
+});
+
+// 造一个只有规模相关字段的 TECH.md，返回渲染文本。
+function mountTechSize({ size, sizeReason, total, threshold }) {
+  const state = makeState({
+    tech: {
+      items: [makeItem({ id: 't1', owner: 'user', minutes: total })],
+      size,
+      sizeReason,
+      threshold,
+    },
+  });
+  return renderTech(state);
+}
+
+test('renderTech：state 没有 threshold 字段（老项目）时不写「阈值」，也不炸', () => {
+  const state = makeState({ tech: { items: [makeItem()], size: 'small', sizeReason: '' } });
+  const text = renderTech(state);
+  assert.match(text, /规模：小（总计 60 分钟）/);
+  assert.doesNotMatch(text, /阈值/);
 });
 
 test('checkTechStructure：返回缺失项，空数组表示完整', () => {
