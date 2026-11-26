@@ -100,6 +100,9 @@ export const inject = ['tools'];
 export function apply(ctx, config) { /* 同步 */ }
 ```
 
+**只导出命名成员，不写 `export default`**：loader 的 `unwrapExports` 会优先取 `default`，
+取走之后命名导出的 `inject` 就丢了，插件读 `ctx.tools` 时报 `without inject`（见 API-FACTS §1）。
+
 `apply` 里：
 
 1. `readConfig(config)` 得配置（配置非法 → 抛错，宁可挂不上也别假装能用）。

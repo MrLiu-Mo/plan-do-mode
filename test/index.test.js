@@ -57,6 +57,26 @@ test('模块契约：name / inject / apply 都按 API-FACTS §1 导出', () => {
   assert.equal(mod.apply.constructor.name === 'AsyncFunction', false);
 });
 
+// 回归（0.1.0 装上去「加载失败」）：cordis-plugin-loader 的 unwrapExports 先取 default——
+//   vendor/loader/lib/index.js: exports = exports.default ?? exports
+// 只要 lib/index.js 导出了 default，loader 就把插件替换成那个函数，命名导出的 inject 被丢掉，
+// 插件读 ctx.tools 时报 `cannot get property "tools" without inject`。
+// 这里逐行复刻 loader 的归一化逻辑，确保归一化之后 inject 还在。
+function unwrapExports(exports) {
+  if (exports === null || exports === undefined) return exports;
+  exports = exports.default ?? exports;
+  if (!exports.__esModule) return exports;
+  return exports.default ?? exports;
+}
+
+test('模块不导出 default：loader 归一化后 inject 仍在（0.1.0 加载失败回归）', () => {
+  assert.equal('default' in mod, false, 'lib/index.js 不能 export default，否则 loader 会丢掉命名 inject');
+  const plugin = unwrapExports(mod);
+  assert.equal(typeof plugin.apply, 'function', 'loader 归一化后必须拿到 apply');
+  assert.deepEqual(plugin.inject, ['tools'], 'loader 归一化后 inject 必须还在');
+  assert.equal(plugin.name, 'plan-do-mode');
+});
+
 test('apply 后注册 8 个工具，且 guards.length === 1', (t) => {
   const root = tmpRoot(t);
   const { ctx, registered, guards } = fakeCtx();

@@ -24,6 +24,10 @@ export function apply(ctx, config) { ... } // 同步；不要 async
 
 - `apply` 里拿不到 `ctx.tools.register` 或 `ctx.tools.guard` 时，**抛错**（宁可挂不上，也别假装拦住了）。
 - 配置手工校验，不引 `schemastery`（见 §6）。
+- **绝不写 `export default apply`**：loader 的 `unwrapExports`（`@deepseek-ai/cordis-plugin-loader`）第一句是
+  `exports = exports.default ?? exports`，有 default 就把整个插件替换成那个函数，命名导出的 `inject` 被丢掉，
+  插件一读 `ctx.tools` 就报 `cannot get property "tools" without inject`，预设里显示「加载失败」。
+  0.1.0 装上去失败就是这条。只导出命名成员，和 `@deepseek-ai/dsh-tool-todo` 一样。
 
 ## 2. 工具注册
 
