@@ -124,6 +124,23 @@ curl.exe -sSL -o NUL -w "%{http_code}" `
 # 期望 200；私有仓库上是 404
 ```
 
+**坑 4：删了 tag 再重推，Release 会自动变成 draft。** GitHub 发现 release 指向的 tag
+不存在时，不会报错、不会通知，只是把 `draft` 置成 `true`——于是 `releases/latest` 返回 404、
+公开页面上看不到这个版本，而 `releases` 列表接口里它还在。**给 tag 换 commit 之后必须确认
+release 仍是 published**：
+
+```powershell
+# 看 draft 是不是被悄悄改成 true 了
+$rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/MrLiu-Mo/plan-do-mode/releases/latest' -Headers $h
+# 404 = 没有 published release；这时去列表接口找 draft，改回发布状态
+$rel = Invoke-RestMethod -Method Patch -Headers $h -ContentType 'application/json' `
+  -Uri "https://api.github.com/repos/MrLiu-Mo/plan-do-mode/releases/<release id>" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes((@{ draft=$false } | ConvertTo-Json)))
+```
+
+所以顺序反了就会出问题：**先确定代码不再动（HEAD 定了），再打 tag，最后建 release**。
+如果确实要移 tag（比如补一条文档提交），移完记得回来把 release 改回 published。
+
 ### 4.3 两条通道的取舍
 
 | | npm | GitHub Release tgz |
