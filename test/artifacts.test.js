@@ -260,17 +260,24 @@ test('renderTech：没有 TECH 项时仍产出可解析的结构', () => {
   assert.match(text, /user 项 0 条 \/ 总计 0 分钟/);
 });
 
-test('renderTech：规模行同时给出总计分钟与阈值，大/小都要写', () => {
+test('renderTech：规模行同时给出总计分钟与阈值，判大时不把数字说两遍', () => {
   const small = mountTechSize({ size: 'small', sizeReason: '', total: 110, threshold: 300 });
   assert.match(small, /规模：小（总计 110 分钟，阈值 300 分钟）/);
 
-  // 判大的理由已经在 sizeReason 里（computeSize 给的），渲染不能再自己拼一遍分钟数。
+  // 判大的原因就是「超阈值」时，一句话说完，不要再把「总计 310、阈值 300」重复一遍。
   const large = mountTechSize({ size: 'large', sizeReason: '预计 310 分钟，超过 300 分钟阈值', total: 310, threshold: 300 });
-  assert.match(large, /规模：大（总计 310 分钟，阈值 300 分钟）——预计 310 分钟，超过 300 分钟阈值/);
+  const largeSizeLine = large.split('\n').find((line) => line.startsWith('- 规模：'));
+  assert.match(largeSizeLine, /规模：大——预计 310 分钟，超过 300 分钟阈值/);
+  assert.equal(largeSizeLine.split('310 分钟').length - 1, 1, '310 分钟在规模行里只该出现一次');
+  assert.doesNotMatch(largeSizeLine, /阈值 300 分钟）/, '不该再出现括号形式的阈值');
+
+  // 判大的原因不是分钟数（承诺风险）时，才需要把「总计/阈值」和「原因」分两段写。
+  const risky = mountTechSize({ size: 'large', sizeReason: '承诺风险', total: 100, threshold: 300 });
+  assert.match(risky, /规模：大（总计 100 分钟，阈值 300 分钟）——承诺风险/);
 
   // 阈值随 state.tech.threshold 走（立项快照），不是写死的 300。
-  const custom = mountTechSize({ size: 'large', sizeReason: 'x', total: 200, threshold: 150 });
-  assert.match(custom, /阈值 150 分钟/);
+  const custom = mountTechSize({ size: 'large', sizeReason: '预计 200 分钟，超过 150 分钟阈值', total: 200, threshold: 150 });
+  assert.match(custom, /超过 150 分钟阈值/);
 });
 
 // 造一个只有规模相关字段的 TECH.md，返回渲染文本。
