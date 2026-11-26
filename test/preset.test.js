@@ -166,6 +166,41 @@ test('persona 不复述 CONTRACT 的事件表（防漂移）', () => {
   assert.deepEqual(leaked, [], `persona 里不要出现事件名（应只说「按工具返回的下一步走」）：${leaked.join(', ')}`);
 });
 
+// --- 讲卡固定格式 / 估时口径 / 语气（A9 之后的三条用户反馈） --------------------
+
+test('persona 要求讲卡按 A/B/C/D 四段，四段标题逐字出现', () => {
+  const { text } = extractBlockScalar('prefix');
+  // 用户反馈：「知识卡缺少固定格式输出」。指对话里的讲卡，不是 .plando/cards/<id>.md。
+  for (const heading of ['A. 本卡目标', 'B. 知识点', 'C. 本步应该做的', 'D. 预期结果']) {
+    assert.ok(text.includes(heading), `persona 必须要求讲卡时写出「${heading}」这一段`);
+  }
+  // 四段要按顺序出现，否则模型会当成四个可选小节。
+  const at = ['A. 本卡目标', 'B. 知识点', 'C. 本步应该做的', 'D. 预期结果'].map((h) => text.indexOf(h));
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'A/B/C/D 四段必须按顺序出现');
+});
+
+test('persona 钉死 minutes 的口径：只算亲手敲并跑通，不含学习与调试', () => {
+  const { text } = extractBlockScalar('prefix');
+  // CONTRACT §3 与 persona 必须是同一口径，否则模型按「含学习时间」估，规模判定必然偏大。
+  assert.match(text, /亲手敲/, 'persona 必须说明 minutes 指「用户亲手敲」的时间');
+  assert.match(text, /不含/, 'persona 必须说明 minutes 不含学概念 / 调环境的时间');
+  assert.match(text, /学概念|查文档|看教程/, 'persona 要具体点出不进 minutes 的那几件事');
+  // 锚点表也要在提示词里，否则模型只能凭感觉估。
+  for (const anchor of ['5–15', '15–30', '20–45', '45–90', '30–60']) {
+    assert.ok(text.includes(anchor), `persona 缺估时锚点 ${anchor} 分钟`);
+  }
+  assert.match(text, /超过 90 分钟[，,]?\s*说明它不该是一项|一项超过 90 分钟/, 'persona 要给出「单项过大就拆开」的口径');
+});
+
+test('persona 语气要求：温和但不奉承，拒绝前先接一句', () => {
+  const { text } = extractBlockScalar('prefix');
+  // 用户反馈：「流程中生成的语气很生硬」。原来只有「直接、不奉承」，「直接」被当成了生硬的许可证。
+  assert.match(text, /温和/, 'persona 必须明确要求语气温和');
+  assert.match(text, /不奉承/, '温和不等于奉承——「不奉承」必须同时保留');
+  // 关键机制：拒绝 / 纠正之前先接住处境，否则「温和」会被理解成少说话。
+  assert.match(text, /一句话.*接住|先接一句/, 'persona 要要求拒绝 / 纠正前先用一句话接住处境');
+});
+
 test('plugins: 下每项 - id: 的对齐一致', () => {
   const pluginsIndex = lines.findIndex((line) => /^\s*plugins:\s*$/.test(line));
   assert.ok(pluginsIndex >= 0, '没找到 plugins: 列表');
