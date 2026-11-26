@@ -31,7 +31,7 @@ plugin_manager action=install_bundle target=dsh-plan-do
 ### 2.2 GitHub Release 的 tgz
 
 从 [Releases → v0.1.0](https://github.com/MrLiu-Mo/plan-do-mode/releases/tag/v0.1.0) 下载
-`dsh-plan-do-0.1.0.tgz`（146 kB，校验和 `c0f6928…65bc9e`），然后：
+`dsh-plan-do-0.1.0.tgz`，然后：
 
 ```bash
 dsh plugin --profile <profile> add ./dsh-plan-do-0.1.0.tgz
@@ -51,6 +51,9 @@ plugin_manager action=install_bundle target=<tgz 的绝对路径>
 
 > **仓库还是私有的时候**，上面那条下载 URL 对未登录的人返回 **404**（不是 401）。
 > 要把包给外部使用，先把仓库转成 public，否则别人只会看到「找不到」。
+>
+> **tgz 的校验和只写在 Release 页面上，不写在这份文档里。** `docs/` 会打进 tgz，
+> 把包的校验和写进包内文档是自指的：改这行字 → 包就变了 → 校验和立刻失效。
 
 ### 2.3 本地目录（开发时最常用）
 

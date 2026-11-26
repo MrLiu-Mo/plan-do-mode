@@ -41,7 +41,8 @@ dsh plugin --profile <profile> add -w "https://github.com/MrLiu-Mo/plan-do-mode/
 
 > **前提：仓库得是 public。** 私有仓库上这条下载 URL 对未登录的人返回 **404**（不是 401），
 > 别人只会看到一句「找不到」。发布给外部使用前先把仓库转成 public。
-> 校验和：`c0f692897d51c931f590240405ea434a93153d8c974179317368a6f86265bc9e`（146 kB）。
+> 校验和见 Release 页面（每版不同）。**不写在这里**：这个 README 会打进 tgz，
+> 写死校验和就会改文档 → 改字节 → 校验和立刻失效，永远对不上。
 
 实测（2026-11-25，本机 pnpm 11）：`dsh plugin --profile <name> add <tgz>` 会把 `dsh-plan-do` 同时写进 `dependencies` 和 `dsh.profile.bundles`；`remove dsh-plan-do` 会两处一起清掉。装完同样是**新建会话 → 预设列表 → 「边学边做」**。
 
