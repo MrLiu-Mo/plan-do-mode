@@ -2788,3 +2788,105 @@ npx <开关> node -e "process.exit(9)"   →  整条命令的退出码必须是 
 
 **要补的第五条**：**修完之后要重跑「另一端还能不能到 `done`」的完整链路，而不是只跑单元测试。**
 R10 / R12 都是「纯函数层满分、工具层能推到 `done` 而用户代码是 `[]`」。这一轮我按 §16 的口径，把 R10 / R12 的验证都写成了**走状态机的脚本**（`declare → run → done`、`scaffold → do → done`），而不是只断言 `doneCard` 的返回值——只有这样才看得见「它其实还是能过」。
+## 18. A9 真装一次抓到的：`export default` 让插件「加载失败」
+
+§17 之后我以为代码层面没有阻塞项了。**A9 第一次真装就把它推翻了**——而且推翻的方式
+恰好是 §16.11 第五条说的那种：单元测试全绿、冒烟脚本全绿，装上去是坏的。
+
+### 18.0 现场
+
+```
+plugin_manager action=install_bundle target=...\dsh-plan-do-0.1.0.tgz
+→ plan-do-mode 加载失败：cannot get property "tools" without inject
+```
+
+预设里显示「加载失败」，`list_plugins` 状态 `failed`。
+
+### 18.1 根因：loader 会先把模块「归一化」再消费
+
+`lib/index.js` 原来最后一行是 `export default apply;`。而 `@deepseek-ai/cordis-plugin-loader`
+的 `unwrapExports`（0.2.1-rc.2 的 `lib/index.js`，从 `app.asar` 里读出来的原文）是：
+
+```js
+unwrapExports(exports) {
+    if (isNullable(exports)) return exports;
+    exports = exports.default ?? exports;
+    if (!exports.__esModule) return exports;
+    return exports.default ?? exports;
+}
+```
+
+第一句 `exports = exports.default ?? exports` 就把**整个模块命名空间**替换成了那个裸函数。
+`inject = ['tools']` 是命名导出，随命名空间一起被丢掉。于是 loader 交给
+`ctx.registry.plugin()` 的是一个**没有 inject 的函数**，cordis 按「没声明依赖」处理，
+插件一读 `ctx.tools` 就报 `cannot get property "tools" without inject`。
+
+修法：删掉 `export default apply;`，只留命名导出——和 `@deepseek-ai/dsh-tool-todo` 一样。
+
+### 18.2 为什么四条验证一条都没拦住
+
+这是这次最值得记的部分。四条验证当时的状态：
+
+| 验证 | 当时验的是什么 | 为什么漏了 |
+|---|---|---|
+| `node --test`（`test/index.test.js`） | `mod.apply` 是函数、`mod.inject` 是 `['tools']` | 验的是**模块本身**，不是 loader 归一化之后的对象。模块本身完全正确 |
+| `verify-pack.mjs` | `files` 白名单没漏文件 | 清单齐 ≠ 装得上 |
+| `smoke-pack.mjs` | 解开 → `import` → **`mod.apply(...)`** | **它绕过了 loader**：直接拿命名空间调 apply，等于走了一条比真实路径更短的等价路径 |
+| `release-check.mjs` | 元数据、占位符、工作区 | 与加载无关 |
+
+关键在第三行。冒烟脚本的存在意义是「证明别人装完之后能跑」，但它自己**没有走别人的那条路**。
+它验的是「模块能被 import 并 apply」，失败发生在「loader 怎么消费这个模块」——两件事之间
+差着一次 `unwrapExports`。
+
+### 18.3 修法与护栏（三层，都验过会让它失败）
+
+1. **`lib/index.js`**：删掉 `export default`，并把原因写成注释钉在文件末尾（下一轮有人
+   「顺手补个 default 方便测试」时会先读到它）。
+2. **`test/index.test.js`**：逐行复刻 `unwrapExports`，断言归一化之后 `inject` 还在。
+3. **`scripts/smoke-pack.mjs`**：改成**走 loader 的归一化**再 apply，并断言
+   `'default' in mod === false`、归一化后 `inject` 包含 `'tools'`。
+
+第 3 条是这次真正的修复——前两条只能守住「这一个 bug」，第 3 条守住「这一类 bug」。
+
+**护栏本身也验过**：把 `export default apply;` 加回去重跑 `smoke-pack`，它必须红。
+第一版护栏红是红了，但报的是假原因：
+
+```
+- plando：ctx.tools.register 不可用，拿不到工具注册表——换一个支持工具注册的 DSH 版本。
+```
+
+因为 `typeof fn.apply === 'function'` **永远为真**（`Function.prototype.apply`），
+裸函数骗过了 apply 检查，一直走到调用处才炸。于是加了一条前置断言，让报告里写真正的原因：
+
+```
+- lib/index.js 导出了 default——loader 会丢掉命名 inject，装上必然「加载失败」
+- loader 归一化后拿到的是裸函数（模块导出了 default），命名 inject 已丢失——装上必然「加载失败」
+- loader 归一化后 inject 丢了（实得 undefined）——装上会报 without inject
+```
+
+### 18.4 第五条方法论的实例化
+
+§17.8 我自己写的第五条是「修完之后要重跑『另一端还能不能到 `done`』的完整链路」。
+这一条还不够狠，它只覆盖了**工具层的状态机**，没覆盖**加载层**。补一条：
+
+> **第六条：冒烟脚本必须走对方的真实路径，不能走一条更短的等价路径。**
+> 「等价」是你以为的等价。`unwrapExports` 这一步看起来只是 `exports.default ?? exports`，
+> 无害到不像逻辑——它恰好是唯一能弄坏 inject 的那一步。
+> 判据：如果你的冒烟脚本里有一句「为了方便，直接调内部函数」，那一句就是漏测点。
+
+这也是「不代写」三层防线之外的一层：**装得上**。前三层都在管 AI 写不写代码，
+这一层管的是插件本身能不能活——它排在最前面，却最晚被验到。
+
+### 18.5 A9 结果
+
+| 步 | 结果 |
+|---|---|
+| 装（tgz） | 第一次失败（上面的 bug）→ 修复后成功 |
+| `list_plugins` | `preset-plan-do` 在，非 `failed` |
+| 新会话预设列表 | 出现「边学边做」 |
+| 「不代写」 | 模型回「当前预设里根本没有 write 工具……这一行得你自己敲」——**结构性拦截生效** |
+| 卸载 | `preset-plan-do` 消失，新会话列表里也没有了 |
+| 数据保留 | `~/.plando/` 还在 |
+
+**A9 通过。** 顺带说明第 4 项：模型给的是「你自己在终端里跑 `echo hello > hello.txt`」，
+而不是「工具不存在所以做不到」——这正是这个模式该有的反应：它没替你写，它让你自己敲。
