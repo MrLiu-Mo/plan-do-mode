@@ -80,6 +80,21 @@ function extract(tgz, into) {
   return root;
 }
 
+/** 复刻 cordis-plugin-loader 的 unwrapExports（lib/index.js，0.2.1-rc.2 实读）。
+ *
+ * 为什么必须在这里复刻：loader 不是直接 `apply(ns)`，它先把模块命名空间过一遍
+ * `exports = exports.default ?? exports`，再 `ctx.registry.plugin(plugin, ...)`。
+ * 本脚本原来直接 `mod.apply(...)`，等于跳过了这一步——于是 0.1.0 的 tgz
+ * （`export default apply`，inject 被丢）能一路冒烟通过，真装上去却「加载失败」。
+ * 冒烟脚本的存在意义就是「别人装完之后能跑」，所以它必须走 loader 的那条路径。
+ */
+function unwrapExports(exports) {
+  if (exports === null || exports === undefined) return exports;
+  exports = exports.default ?? exports;
+  if (!exports.__esModule) return exports;
+  return exports.default ?? exports;
+}
+
 /** apply + 一遍流程。返回问题清单，不抛。 */
 async function runFlow(root, work) {
   const problems = [];
@@ -88,10 +103,24 @@ async function runFlow(root, work) {
 
   ok(mod.name === 'plan-do-mode', `导出 name 不对：${mod.name}`);
   ok(typeof mod.apply === 'function', 'apply 不是函数');
+  ok('default' in mod === false, 'lib/index.js 导出了 default——loader 会丢掉命名 inject，装上必然「加载失败」');
+
+  // 走 loader 的归一化，拿到它真正会交给 ctx.registry.plugin 的那个对象。
+  const plugin = unwrapExports(mod);
+
+  // 注意 `typeof fn.apply === 'function'` 永远是 true（Function.prototype.apply），
+  // 所以「有 default」时裸函数能骗过 apply 检查，然后在调用处炸出一句
+  // 「ctx.tools.register 不可用」——那是误导人的假原因。这里先判 inject，判不过就立刻收工，
+  // 让报告里写的是真正的原因（inject 丢了），而不是下游症状。
+  ok(!(typeof plugin === 'function'),
+    'loader 归一化后拿到的是裸函数（模块导出了 default），命名 inject 已丢失——装上必然「加载失败」');
+  ok(plugin && Array.isArray(plugin.inject) && plugin.inject.includes('tools'),
+    `loader 归一化后 inject 丢了（实得 ${JSON.stringify(plugin && plugin.inject)}）——装上会报 without inject`);
+  if (problems.length > 0) return problems;
 
   const registered = [];
   const guards = [];
-  mod.apply({ tools: { register: (def) => registered.push(def), guard: (fn) => guards.push(fn) } }, {
+  plugin.apply({ tools: { register: (def) => registered.push(def), guard: (fn) => guards.push(fn) } }, {
     dataRoot: path.join(work, 'data'),
     autoCommit: false,
   });

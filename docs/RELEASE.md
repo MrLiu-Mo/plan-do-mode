@@ -45,7 +45,7 @@ node scripts/release-check.mjs
 ## 3. 四条验证全过
 
 ```bash
-node --test                     # 404 条，必须全绿
+node --test                     # 405 条，必须全绿
 node scripts/check-docs.mjs     # 文档交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 真打包 → 解开 → 真加载 → 跑一遍流程
@@ -92,12 +92,27 @@ git push origin v0.1.0
 这是**唯一不能自动化**的一步：`scripts/smoke-pack.mjs` 只证明「包解开后能被 import」，
 证明不了「DSH 真的把它挂进 profile 且预设列表里出现」。所以：
 
+> **0.1.0 的第一次真装就是这么翻车的**：tgz 装上去显示「加载失败」，报
+> `cannot get property "tools" without inject`。原因是 `lib/index.js` 里有
+> `export default apply`——`cordis-plugin-loader` 的 `unwrapExports` 第一句是
+> `exports = exports.default ?? exports`，于是整个插件被替换成那个裸函数，命名导出的
+> `inject = ['tools']` 随之丢失。
+>
+> **为什么四条验证没拦住**：`smoke-pack.mjs` 当时直接 `mod.apply(...)`，绕过了 loader 的
+> 归一化那一步——它验的是「模块能 import」，而失败发生在「loader 怎么消费这个模块」。
+> 现在 `smoke-pack.mjs` 复刻了 `unwrapExports`，并断言归一化后 `inject` 还在；
+> 把 `export default` 加回去它会红，报告里直接写「命名 inject 已丢失」。
+>
+> 教训：**冒烟脚本必须走真实加载路径，不能走一条更短的等价路径。** 短路径验的是你以为的
+> 契约，不是对方的实现。
+
 1. **开一个创造模式的会话**（普通会话里没有 `plugin_manager`）。
 2. 装：
    ```text
    plugin_manager action=install_bundle target=<tgz 绝对路径>
    ```
 3. `plugin_manager action=list_plugins` → 应出现 `preset-plan-do`，状态不是 `failed`。
+   **看到 `failed` 就是加载阶段炸了**，最常见的就是上面那条 `without inject`。
 4. **新开一个会话**，预设选择器里应出现 **「边学边做」**（id `plan-do`，排序 25）。
 5. 选中它，让模型调 `plando_status` → 它应该说「还没有项目，先 plando_project init 或 plando_idea add」。
 6. 按 [INSTALL.md](INSTALL.md) §4 的冒烟清单逐条打勾（重点是「守卫真的在拦写工具」）。
