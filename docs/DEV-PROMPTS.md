@@ -164,7 +164,8 @@ node -e "import('./lib/state.js').then(m=>{for(const f of ['canTransition','vali
    choose_verify 的 timeboxMin 边界（0 / 60 / 61）；verify_result 的 result 非法值。
 3. test/state.budget.test.js
    覆盖 §3 预算与规模：user 条数超限、总分钟超限（reason 含两个数字）、
-   totalMinutes>180 判 large、promiseRisk 判 large、large 时 decide 推荐必须 verify。
+   totalMinutes>阈值（默认 300，可被 config.sizeThresholdMinutes 覆盖）判 large、
+   阈值边界 300/301、非法阈值退回默认、promiseRisk 判 large、large 时 decide 推荐必须 verify。
 
 【关键要求】
 - 只断言必须为真的东西：错误消息用正则匹配关键片段（如 /阶段/、/预算/），不要断言整句文案。
