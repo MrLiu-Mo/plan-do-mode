@@ -211,8 +211,9 @@ node -e "import('./lib/artifacts.js').then(m=>{console.log(typeof m.renderIdea, 
 【本轮目标】让状态能落到磁盘、能定位项目、能安全提交。这一轮第一次碰真实文件系统，务必用临时目录测。
 
 【产出】
-- lib/config.js：readConfig(raw) -> { dataRoot, budget, defaultProjectDir, autoCommit, guardExtraDeny }
+- lib/config.js：readConfig(raw) -> { dataRoot, budget, defaultProjectDir, autoCommit, guardExtraDeny, sizeThresholdMinutes }
   校验规则：dataRoot 为空则默认 os.homedir()/.plando；budget 缺省 { mustUnderstand:5, totalMinutes:600 }；
+  sizeThresholdMinutes 缺省 300（正整数，判「大项目」的总分钟阈值）；
   autoCommit 默认 false（布尔强转）；非法值抛中文错误。
 - lib/project.js：openProject(dir)、initProject(dir)、listProjects()、loadState(dir)、saveState(dir, state)、
   readIdeas()、writeIdeas(list)、原子写（写 .tmp 再 rename）。

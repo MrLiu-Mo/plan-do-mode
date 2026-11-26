@@ -47,7 +47,7 @@ export const TRANSITIONS;       // { [event]: { from: string[], to: string } }
 export function canTransition(state, event);                 // -> boolean
 export function validatePayload(event, payload, config);     // -> { ok, reason? }
 export function applyEvent(state, event, payload, config);   // -> { ok, state?, reason?, effects? }
-export function computeSize(items, constraints);             // -> { size, sizeReason, totalMinutes }
+export function computeSize(items, constraints, threshold);   // -> { size, sizeReason, totalMinutes }
 export function checkBudget(items, budget);                  // -> { ok, reason? }
 export function migrate(state);                              // -> { ok, state?, reason? }
 export function inspectShape(state);                          // -> string[]，空数组表示 shape 可用
@@ -334,6 +334,16 @@ plando：<现在在哪>，<为什么不行>——<下一步做什么>
 **`renderTech` 的预算来源**（契约补充）：`renderTech(state, options?)` 的读取顺序固定为
 `options.budget` → `state.budget` → 契约默认 `{5, 600}`。其中 `options.budget` **只作测试或显式覆盖**，
 生产路径读 `state.budget`。
+
+**TECH.md 的规模行**（契约补充）：预算汇总之后必须有一行说明规模，形如
+
+```
+- 规模：大（总计 310 分钟，阈值 300 分钟）——预计 310 分钟，超过 300 分钟阈值
+```
+
+其中「总计 N 分钟」由渲染时按 `items[].minutes` 求和（与 `computeSize` 同口径），
+「阈值 M 分钟」读 `state.tech.threshold`；老项目没有该字段时**省略「，阈值 M 分钟」**这一段，
+不要猜一个默认值写进产物（产物必须如实反映 state）。
 
 `HANDOFF.md`、`CHANGE-GUIDE.md`、卡片正文 `<项目>/.plando/cards/<id>.md` 的结构由 `artifacts.js` 自己定，
 但必须满足：卡片正文含「学 / 做 / 验」三段小标题，且每段都有可执行判据。
