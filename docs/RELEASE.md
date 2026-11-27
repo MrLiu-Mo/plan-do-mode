@@ -25,7 +25,7 @@ node scripts/release-check.mjs
 | `package.json` 的 `bugs` | `https://github.com/MrLiu-Mo/plan-do-mode/issues` |
 | `package.json` 的 `icon` | `./icon.svg`（与 `exports` 里那条一致，包内自描述） |
 | `package.json` 的 `author` | `MrLiu-Mo <2837243604@qq.com>`（会公开显示在 npm 页面） |
-| `README.md` / `PLAN.md` 的 tgz 链接 | `github.com/MrLiu-Mo/plan-do-mode` |
+| `README.md`（英文，GitHub 首页）/ `README.zh.md`（中文）/ `PLAN.md` 的 tgz 链接 | `github.com/MrLiu-Mo/plan-do-mode` |
 
 改完跑 `node scripts/release-check.mjs`——它会把**还指向假仓库的网址**指出来
 （只提到占位符号样的说明文字不算，判据要求占位符紧挨 URL 上下文）。
@@ -45,7 +45,7 @@ node scripts/release-check.mjs
 ## 3. 四条验证全过
 
 ```bash
-node --test                     # 417 条，必须全绿
+node --test                     # 423 条，必须全绿
 node scripts/check-docs.mjs     # 文档交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 真打包 → 解开 → 真加载 → 跑一遍流程

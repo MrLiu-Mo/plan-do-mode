@@ -28,7 +28,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** 包里必须有 / 必须没有的路径。被 verify-pack 的清单断言之外的第二道保险。 */
 export function checkExtracted(root) {
   const problems = [];
-  const must = ['package.json', 'cordis.patch.yml', 'lib/index.js', 'README.md', 'LICENSE', 'locale/zh.json'];
+  const must = ['package.json', 'cordis.patch.yml', 'lib/index.js', 'README.md', 'README.zh.md', 'LICENSE', 'locale/zh.json'];
   const mustNot = ['test', 'scripts', path.join('docs', 'REVIEW-tools.md'), path.join('docs', 'REVIEW-state.md')];
 
   for (const rel of must) {

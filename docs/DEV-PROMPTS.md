@@ -81,13 +81,13 @@
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }，
   "exports": { ".": "./lib/index.js", "./cordis.patch.yml": "./cordis.patch.yml",
                "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg", "./package.json": "./package.json" }，
-  "files": ["lib","cordis.patch.yml","locale/*.json","icon.svg","README.md","LICENSE","docs"]，
+  "files": ["lib","cordis.patch.yml","locale/*.json","icon.svg","README.md","README.zh.md","LICENSE","docs"]，
   "scripts": { "test": "node --test", "verify-pack": "node scripts/verify-pack.mjs" }。
   不要写 dependencies / devDependencies。
 - LICENSE：MIT 全文。
 - locale/en.json、locale/zh.json：{ "meta": { "title": "...", "description": "..." } }，两语各一份。
 - icon.svg：原创、纯矢量、256x256 视框、无外部引用。
-- README.md 骨架：一句话是什么、三条装法（npm / tgz / 本地 bundle）、装了之后怎么用、能力说明（见 PLAN 第十节）。
+- README.md 骨架（英文，GitHub 首页）：一句话是什么、三条装法（npm / tgz / 本地 bundle）、装了之后怎么用、能力说明（见 PLAN 第十节）；中文版放 README.zh.md，两份互相链接。
 - .gitignore 补充：node_modules/、*.tgz、.plando/。
 
 【验收命令】
@@ -328,7 +328,7 @@ node -e "const t=require('fs').readFileSync('cordis.patch.yml','utf8'); ['preset
 
 【产出】
 - scripts/verify-pack.mjs：跑 npm pack --dry-run --json，断言清单包含
-  lib/ 下每个 .js、cordis.patch.yml、locale/en.json、locale/zh.json、icon.svg、README.md、LICENSE；
+  lib/ 下每个 .js、cordis.patch.yml、locale/en.json、locale/zh.json、icon.svg、README.md、README.zh.md、LICENSE；
   缺一个就 process.exit(1) 并打印缺哪个。
 - .github/workflows/test.yml：ubuntu + windows 两平台跑 node --test 和 npm run verify-pack。
 - docs/PROTOCOL.md：人读流程——阶段、每个出口的判据、卡住协议、常见问题。

@@ -59,6 +59,7 @@ export function collectExpected(root = ROOT) {
       'locale/zh.json',
       'icon.svg',
       'README.md',
+      'README.zh.md',
       'LICENSE',
       ...docFiles,
     ],

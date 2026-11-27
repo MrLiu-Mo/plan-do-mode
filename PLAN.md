@@ -262,7 +262,7 @@ plugin_manager action=install_bundle target=A:\AI\plan-do-mode
 ### 10.2 包元数据（照 `dsh-preset-deep` / `dsh-team-control` 的既有惯例）
 
 - `"type": "module"`；`exports` 暴露 `.` / `./cordis.patch.yml` / `./locale/*.json` / `./icon` / `./package.json`
-- `"files"` 白名单：`lib/`、`cordis.patch.yml`、`locale/*.json`、`icon.svg`、`README.md`、`LICENSE`、`docs/`，再减 `!docs/REVIEW-*.md`
+- `"files"` 白名单：`lib/`、`cordis.patch.yml`、`locale/*.json`、`icon.svg`、`README.md`、`README.zh.md`、`LICENSE`、`docs/`，再减 `!docs/REVIEW-*.md`
   （两份内部红队报告共约 150 KB，行号指向某个 commit、装包用户用不上；**留仓库、不进包**，
   `scripts/verify-pack.mjs` 会断言它们没被误打包）
 - `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`

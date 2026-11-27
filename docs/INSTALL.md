@@ -49,7 +49,7 @@ dsh plugin --profile <profile> add -w "https://github.com/MrLiu-Mo/plan-do-mode/
 plugin_manager action=install_bundle target=<tgz 的绝对路径>
 ```
 
-> **仓库已转 public，上面那条下载 URL 匿名可访问**（实测 200 + 149 kB + 校验和一致）。
+> **仓库已转 public，上面那条下载 URL 匿名可访问**（实测 200 + 152 kB + 校验和一致）。
 > 若哪天又改回 private，同一条 URL 会对未登录的人返回 **404（不是 401）**，别人只会看到
 > 「找不到」而看不出是权限问题。判据：
 > `curl -sSL -o NUL -w "%{http_code}" https://github.com/MrLiu-Mo/plan-do-mode/releases/download/v0.1.0/dsh-plan-do-0.1.0.tgz`
@@ -162,7 +162,7 @@ init→clarify→idea」那半）。下面这 9 步按顺序做，每步都给�
 node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" pack
 ```
 
-**该看到**：`dsh-plan-do-0.1.0.tgz`，约 149 kB，`npm notice total files: 28`。
+**该看到**：`dsh-plan-do-0.1.0.tgz`，约 152 kB，`npm notice total files: 29`。
 （`*.tgz` 在 `.gitignore` 里，不会污染仓库。）
 
 ### 5.5.2 装（创造模式会话）
@@ -259,7 +259,7 @@ Test-Path "$env:USERPROFILE\.plando\ideas.json"          # 仍是 True
 ## 6. 开发者自查（改完代码之后）
 
 ```bash
-node --test                     # 417 条，必须全绿
+node --test                     # 423 条，必须全绿
 node scripts/check-docs.mjs     # 文档与代码的交叉引用一致
 node scripts/verify-pack.mjs    # 分发包清单完整（真跑 npm pack --dry-run）
 node scripts/smoke-pack.mjs     # 分发包冒烟：真打包 → 解开 → 真加载 → 跑一遍流程

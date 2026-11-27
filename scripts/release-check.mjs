@@ -127,6 +127,7 @@ function main() {
   const meta = JSON.parse(read('package.json'));
   const docs = {
     'README.md': read('README.md'),
+    'README.zh.md': read('README.zh.md'),
     'PLAN.md': read('PLAN.md'),
     'docs/INSTALL.md': read('docs/INSTALL.md'),
     'docs/RELEASE.md': read('docs/RELEASE.md'),

@@ -25,6 +25,7 @@ function goodList() {
     'cordis.patch.yml',
     'icon.svg',
     'README.md',
+    'README.zh.md',
     'LICENSE',
     'locale/en.json',
     'locale/zh.json',
@@ -110,7 +111,7 @@ test('docs 缺一个 md 失败', () => {
 });
 
 test('缺 cordis.patch.yml / icon.svg / LICENSE 都会失败', () => {
-  for (const missing of ['cordis.patch.yml', 'icon.svg', 'LICENSE', 'README.md']) {
+  for (const missing of ['cordis.patch.yml', 'icon.svg', 'LICENSE', 'README.md', 'README.zh.md']) {
     const result = checkPackList(goodList().filter((file) => file !== missing), expected);
     assert.equal(result.ok, false, `${missing} 缺失时应当失败`);
     assert.ok(result.problems.some((p) => p.includes(missing)), result.problems.join('\n'));

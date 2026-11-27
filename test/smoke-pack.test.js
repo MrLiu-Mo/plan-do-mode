@@ -19,7 +19,7 @@ const { checkExtracted } = smoke;
 function goodRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plando-smoke-unit-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const rel of ['cordis.patch.yml', 'README.md', 'LICENSE', 'locale/zh.json', 'lib/index.js', 'docs/CONTRACT.md']) {
+  for (const rel of ['cordis.patch.yml', 'README.md', 'README.zh.md', 'LICENSE', 'locale/zh.json', 'lib/index.js', 'docs/CONTRACT.md']) {
     const file = path.join(root, rel);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, 'x', 'utf8');
